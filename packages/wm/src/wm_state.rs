@@ -4,7 +4,9 @@ use anyhow::Context;
 use tokio::sync::mpsc::{self};
 use tracing::warn;
 use uuid::Uuid;
-use wm_common::{BindingModeConfig, HideCorner, WindowState, WmEvent};
+use wm_common::{
+  BindingModeConfig, DisplayState, HideCorner, WindowState, WmEvent,
+};
 use wm_platform::{
   Direction, Dispatcher, Display, NativeWindow, Point, Rect,
 };
@@ -167,9 +169,33 @@ impl WmState {
     }
 
     platform_sync(self, config)?;
+    self.settle_display_states();
     self.has_initialized = true;
 
     Ok(())
+  }
+
+  /// Settles windows that are mid-transition (`DisplayState::Showing` or
+  /// `DisplayState::Hiding`) based on whether they're actually visible.
+  ///
+  /// Transitions normally complete when the OS emits a shown/hidden event.
+  /// The events caused by the initial platform sync are emitted before the
+  /// window listener starts, so they're never received. Without this,
+  /// windows hidden on startup (e.g. columns outside a scrolling
+  /// workspace's viewport) would stay `Hiding`, and their focus events
+  /// would be ignored.
+  fn settle_display_states(&self) {
+    for window in self.windows() {
+      let is_visible = window.native().is_visible();
+
+      let settled_state = match (window.display_state(), is_visible) {
+        (DisplayState::Hiding, Ok(false)) => DisplayState::Hidden,
+        (DisplayState::Showing, Ok(true)) => DisplayState::Shown,
+        (display_state, _) => display_state,
+      };
+
+      window.set_display_state(settled_state);
+    }
   }
 
   pub fn monitors(&self) -> Vec<Monitor> {
