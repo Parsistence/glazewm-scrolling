@@ -4,11 +4,12 @@
 //! mock builders in the model modules.
 
 use bon::bon;
+use tokio::sync::mpsc;
 use wm_common::{
   FloatingStateConfig, GapsConfig, ScrollingConfig, TilingDirection,
   WindowState, WorkspaceConfig, WorkspaceLayout,
 };
-use wm_platform::{Display, NativeWindow, Rect, RectDelta};
+use wm_platform::{Dispatcher, Display, NativeWindow, Rect, RectDelta};
 
 use crate::{
   commands::container::attach_container,
@@ -18,6 +19,7 @@ use crate::{
     Workspace,
   },
   traits::TilingSizeGetters,
+  wm_state::WmState,
 };
 
 pub const MOCK_MONITOR_WIDTH: i32 = 1680;
@@ -261,5 +263,29 @@ impl Workspace {
     }
 
     workspace
+  }
+}
+
+impl WmState {
+  /// Creates a `WmState` with a mock dispatcher, holding the given
+  /// monitors.
+  ///
+  /// Emitted events are discarded, since the state is never marked as
+  /// initialized.
+  pub fn mock(monitors: Vec<Monitor>) -> Self {
+    let (event_tx, _) = mpsc::unbounded_channel();
+    let (exit_tx, _) = mpsc::unbounded_channel();
+    let state = Self::new(Dispatcher::mock(), event_tx, exit_tx);
+
+    for monitor in monitors {
+      attach_container(
+        &monitor.into(),
+        &state.root_container.clone().into(),
+        None,
+      )
+      .unwrap();
+    }
+
+    state
   }
 }

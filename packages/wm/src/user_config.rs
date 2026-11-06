@@ -382,6 +382,23 @@ impl UserConfig {
 }
 
 #[cfg(test)]
+impl UserConfig {
+  /// Creates a `UserConfig` from the default (sample) config, without
+  /// reading or writing a config file.
+  pub fn mock() -> Self {
+    let value = serde_yaml::from_str(SAMPLE_CONFIG)
+      .expect("Sample config should be valid.");
+
+    Self {
+      path: PathBuf::new(),
+      value,
+      value_str: SAMPLE_CONFIG.to_string(),
+      window_rules_by_event: HashMap::new(),
+    }
+  }
+}
+
+#[cfg(test)]
 mod tests {
   use wm_common::{InvokeCommand, ParsedConfig, WorkspaceLayout};
   use wm_platform::{LengthUnit, LengthValue};
