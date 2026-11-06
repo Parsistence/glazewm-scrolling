@@ -11,22 +11,23 @@ use windows::{
   Win32::{
     Foundation::{BOOL, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM},
     Graphics::Dwm::{
-      DwmFlush, DwmGetCompositionTimingInfo, DwmQueryThumbnailSourceSize,
-      DwmRegisterThumbnail, DwmUnregisterThumbnail,
-      DwmUpdateThumbnailProperties, DWM_THUMBNAIL_PROPERTIES,
-      DWM_TIMING_INFO, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
-      DWM_TNP_RECTSOURCE, DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
+      DwmFlush, DwmGetCompositionTimingInfo, DwmRegisterThumbnail,
+      DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
+      DWM_THUMBNAIL_PROPERTIES, DWM_TIMING_INFO, DWM_TNP_OPACITY,
+      DWM_TNP_RECTDESTINATION, DWM_TNP_RECTSOURCE,
+      DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
       CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-      GetTopWindow, GetWindow, GetWindowLongPtrW, PeekMessageW,
-      RegisterClassW, SetWindowPos, ShowWindow, TranslateMessage,
-      GWL_EXSTYLE, GW_HWNDNEXT, GW_HWNDPREV, HTTRANSPARENT, HWND_TOP,
-      MA_NOACTIVATE, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
-      SW_HIDE, WM_MOUSEACTIVATE, WM_NCHITTEST, WNDCLASSW,
-      WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
-      WS_EX_TOPMOST, WS_POPUP,
+      GetTopWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
+      PeekMessageW, RegisterClassW, SetWindowPos, ShowWindow,
+      TranslateMessage, GWL_EXSTYLE, GW_HWNDNEXT, GW_HWNDPREV,
+      HTTRANSPARENT, HWND_TOP, MA_NOACTIVATE, MSG, PM_REMOVE,
+      SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_MOUSEACTIVATE,
+      WM_NCHITTEST, WNDCLASSW, WS_EX_NOACTIVATE,
+      WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+      WS_POPUP,
     },
   },
 };
@@ -398,7 +399,12 @@ impl Session {
 
     for (window_id, rect) in slide.rects_at(at) {
       if let Some(thumbnail_id) = self.thumbnails.get(&window_id) {
-        update_thumbnail(*thumbnail_id, &rect, &self.clip_rect);
+        update_thumbnail(
+          *thumbnail_id,
+          HWND(window_id.0),
+          &rect,
+          &self.clip_rect,
+        );
       }
     }
   }
@@ -444,8 +450,13 @@ impl Session {
 }
 
 /// Draws the part of a window's thumbnail that lies within `clip_rect`,
-/// as if the window were positioned at `rect`.
-fn update_thumbnail(thumbnail_id: isize, rect: &Rect, clip_rect: &Rect) {
+/// as if the window's outer frame were positioned at `rect`.
+fn update_thumbnail(
+  thumbnail_id: isize,
+  source: HWND,
+  rect: &Rect,
+  clip_rect: &Rect,
+) {
   let visible = Rect::from_ltrb(
     rect.left.max(clip_rect.left),
     rect.top.max(clip_rect.top),
@@ -458,14 +469,25 @@ fn update_thumbnail(thumbnail_id: isize, rect: &Rect, clip_rect: &Rect) {
     && rect.width() > 0
     && rect.height() > 0;
 
-  // Scale from `rect` to the source window's actual size, since they can
+  // Thumbnail source coordinates are relative to the source window's
+  // outer frame (including invisible resize borders), even though
+  // `DwmQueryThumbnailSourceSize` reports the size of the visible frame.
+  // Scale from `rect` to the outer frame's actual size, since they can
   // differ (e.g. while a column is resized).
-  // SAFETY: The thumbnail ID is valid while registered.
-  let source_size = unsafe { DwmQueryThumbnailSourceSize(thumbnail_id) }
-    .unwrap_or(SIZE {
-      cx: rect.width(),
-      cy: rect.height(),
-    });
+  let mut outer_frame = RECT::default();
+  // SAFETY: `outer_frame` is a valid out pointer. On failure, `rect`'s
+  // size is used.
+  let source_size =
+    match unsafe { GetWindowRect(source, &raw mut outer_frame) } {
+      Ok(()) => SIZE {
+        cx: outer_frame.right - outer_frame.left,
+        cy: outer_frame.bottom - outer_frame.top,
+      },
+      Err(_) => SIZE {
+        cx: rect.width(),
+        cy: rect.height(),
+      },
+    };
 
   let scale_x = f64::from(source_size.cx) / f64::from(rect.width().max(1));
   let scale_y =

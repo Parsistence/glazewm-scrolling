@@ -37,7 +37,7 @@ impl WindowPreview {
   /// overlay covers exactly `visible_rect`.
   ///
   /// Both rects are in screen coordinates. `source_rect` is the source
-  /// window's visible frame (excluding invisible resize borders), and
+  /// window's outer frame (as passed to the OS when positioning it), and
   /// doesn't need to match where the source window actually is.
   ///
   /// If `raise` is `true`, the overlay is brought to the top of the
