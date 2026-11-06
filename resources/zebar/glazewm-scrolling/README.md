@@ -9,7 +9,14 @@ Top bar for GlazeWM Scrolling, based on Zebar's `glzr-io.starter` `with-glazewm`
 
 ## Install
 
-Copy this folder to `%USERPROFILE%\.glzr\zebar\glazewm-scrolling`, then in Zebar's tray menu pick `Widget packs` → `glazewm-scrolling` → `scrolling-bar` and enable it (and `Run on startup`). Disable the previous bar to avoid two bars overlapping.
+Copy this folder to `%USERPROFILE%\.glzr\zebar\glazewm-scrolling`. GlazeWM Scrolling's default config starts this bar when the WM starts:
+
+```yaml
+general:
+  startup_commands: ['shell-exec zebar start-widget-preset --pack glazewm-scrolling --widget-name scrolling-bar --preset default']
+```
+
+This leaves Zebar's own startup settings alone, so upstream GlazeWM keeps starting its usual bar with `shell-exec zebar`.
 
 Requires GlazeWM Scrolling, which exposes each workspace's `layout` and `scrolling` state over IPC.
 

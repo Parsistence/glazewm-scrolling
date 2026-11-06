@@ -9,16 +9,19 @@ use crate::{platform_impl, Easing, NativeWindow, Rect, WindowId};
 pub type SlideKey = u128;
 
 /// A window to slide from one position to another.
+///
+/// Rects are of the window's visible frame, excluding invisible resize
+/// borders, since that's the area a preview shows.
 #[derive(Clone, Debug)]
 pub struct SlideTarget {
   pub window: NativeWindow,
 
-  /// Outer frame the window's preview starts at. Ignored if the window is
-  /// already being animated with the same key, in which case it starts
+  /// Visible frame the window's preview starts at. Ignored if the window
+  /// is already being animated with the same key, in which case it starts
   /// from its current animated position.
   pub from: Rect,
 
-  /// Outer frame the window's preview ends at.
+  /// Visible frame the window's preview ends at.
   pub to: Rect,
 }
 

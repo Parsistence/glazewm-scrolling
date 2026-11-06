@@ -238,8 +238,10 @@ fn cancel_stale_animations(state: &mut WmState) {
   }
 }
 
-/// Gets the tiling windows of a workspace with the rects their outer
-/// frames are positioned at.
+/// Gets the tiling windows of a workspace with the rects of their visible
+/// frames, i.e. excluding invisible resize borders (shadow borders).
+///
+/// These match what DWM thumbnails of the windows show.
 fn tiling_window_rects(
   workspace: &Workspace,
 ) -> anyhow::Result<Vec<(WindowContainer, Rect)>> {
@@ -248,7 +250,8 @@ fn tiling_window_rects(
     .filter_map(|descendant| descendant.as_window_container().ok())
     .filter(WindowContainer::is_tiling_window)
     .map(|window| {
-      let rect = window_frame_rect(&window)?;
+      let rect =
+        window.to_rect()?.apply_delta(&window.border_delta(), None);
       Ok((window, rect))
     })
     .collect()
@@ -336,11 +339,21 @@ fn sync_window_previews(state: &mut WmState) -> anyhow::Result<()> {
       if let PeekDecision::Preview(visible_rect) =
         window_peek(&window, &workspace, state)?
       {
+        // Previews show the visible frame, excluding invisible resize
+        // borders.
+        let source_rect =
+          window.to_rect()?.apply_delta(&window.border_delta(), None);
+
         desired.push(DesiredPreview {
           window_id: window.id(),
           native_window: window.native().clone(),
-          source_rect: window_frame_rect(&window)?,
-          visible_rect,
+          visible_rect: Rect::from_ltrb(
+            visible_rect.left.max(source_rect.left),
+            visible_rect.top.max(source_rect.top),
+            visible_rect.right.min(source_rect.right),
+            visible_rect.bottom.min(source_rect.bottom),
+          ),
+          source_rect,
         });
       }
     }

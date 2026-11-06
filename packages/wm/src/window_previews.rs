@@ -11,7 +11,8 @@ pub struct DesiredPreview {
   pub window_id: Uuid,
   pub native_window: NativeWindow,
 
-  /// Where the window would be placed in the strip.
+  /// Visible frame of the window (excluding invisible resize borders)
+  /// where it would be placed in the strip.
   pub source_rect: Rect,
 
   /// Area of the window that should be visible.
