@@ -1,0 +1,46 @@
+{
+  "$schema": "https://github.com/glzr-io/zebar/raw/v3.0.0/resources/zpack-schema.json",
+  "name": "glazewm-scrolling",
+  "version": "0.1.0",
+  "description": "Top bar for GlazeWM Scrolling, with a PaperWM-style workspace scrollbar. Scroll over the bar to move between columns.",
+  "tags": ["topbar", "glazewm"],
+  "previewImages": [],
+  "repositoryUrl": "https://github.com/Parsistence/glazewm-scrolling",
+  "widgets": [
+    {
+      "name": "scrolling-bar",
+      "htmlPath": "./scrolling-bar.html",
+      "zOrder": "normal",
+      "shownInTaskbar": false,
+      "focused": false,
+      "resizable": true,
+      "transparent": true,
+      "includeFiles": ["*.html", "*.css", "scrollbar.js"],
+      "caching": {
+        "defaultDuration": 604800,
+        "rules": []
+      },
+      "privileges": {
+        "shellCommands": []
+      },
+      "presets": [
+        {
+          "name": "default",
+          "anchor": "top_left",
+          "offsetX": "0px",
+          "offsetY": "0px",
+          "width": "100%",
+          "height": "40px",
+          "monitorSelection": {
+            "type": "all"
+          },
+          "dockToEdge": {
+            "enabled": false,
+            "edge": null,
+            "windowMargin": "0px"
+          }
+        }
+      ]
+    }
+  ]
+}
