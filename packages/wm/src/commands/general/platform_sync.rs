@@ -404,9 +404,10 @@ fn redraw_containers(
 
 /// Moves and resizes a window to its target rect, and shows or hides it.
 ///
-/// Windows in scrolled-out columns (`is_scrolled_out`) are kept at their
-/// position in the strip and cloaked, regardless of the hide method. This
-/// keeps their DWM thumbnails live and them visible in the taskbar.
+/// Windows in scrolled-out columns (`is_scrolled_out`) are parked within
+/// the viewport and cloaked, regardless of the hide method. This keeps
+/// their DWM thumbnails live, keeps them visible in the taskbar, and keeps
+/// them on-screen if the WM exits without restoring them.
 fn reposition_window(
   window: &WindowContainer,
   hide_corner: HideCorner,
@@ -422,6 +423,17 @@ fn reposition_window(
   let rect = window
     .to_rect()?
     .apply_delta(&window.total_border_delta()?, None);
+
+  // Scrolled-out windows are parked within the viewport while cloaked, so
+  // that they never end up off-screen (e.g. if the WM crashes).
+  let rect = if is_scrolled_out {
+    window
+      .workspace()
+      .context("No workspace.")?
+      .parked_column_rect(&rect)?
+  } else {
+    rect
+  };
 
   // For `HideMethod::PlaceInCorner`, we need to reposition windows on
   // hidden workspaces to the corner of the monitor.
@@ -533,26 +545,39 @@ fn reposition_window(
         }
       }
 
-      // Set visibility based on the hide method. Scrolled-out windows are
-      // always cloaked (and otherwise shown). The order of calls avoids
-      // the window briefly flashing into view.
-      if config.value.general.hide_method == HideMethod::Cloak {
-        window.native().set_cloaked(!is_visible)?;
-      } else if is_scrolled_out {
-        window.native().set_cloaked(true)?;
-        window.native().show()?;
-      } else {
-        if is_visible {
-          window.native().show()?;
-        } else {
-          window.native().hide()?;
-        }
+      set_visibility(window, is_visible, is_scrolled_out, config)?;
+    }
+  }
 
-        // Uncloak windows that were previously scrolled out.
-        if window.native().is_cloaked().unwrap_or(false) {
-          window.native().set_cloaked(false)?;
-        }
-      }
+  Ok(())
+}
+
+/// Shows, hides, or cloaks a window based on the hide method.
+///
+/// Scrolled-out windows are always cloaked (and otherwise shown). The
+/// order of calls avoids the window briefly flashing into view.
+#[cfg(target_os = "windows")]
+fn set_visibility(
+  window: &WindowContainer,
+  is_visible: bool,
+  is_scrolled_out: bool,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  if config.value.general.hide_method == HideMethod::Cloak {
+    window.native().set_cloaked(!is_visible)?;
+  } else if is_scrolled_out {
+    window.native().set_cloaked(true)?;
+    window.native().show()?;
+  } else {
+    if is_visible {
+      window.native().show()?;
+    } else {
+      window.native().hide()?;
+    }
+
+    // Uncloak windows that were previously scrolled out.
+    if window.native().is_cloaked().unwrap_or(false) {
+      window.native().set_cloaked(false)?;
     }
   }
 

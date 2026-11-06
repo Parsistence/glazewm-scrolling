@@ -299,6 +299,46 @@ impl Workspace {
     )
   }
 
+  /// Moves a rect of a column that lies outside the viewport into the
+  /// viewport. See [`scrolling::parked_x`].
+  pub fn parked_column_rect(
+    &self,
+    column_rect: &Rect,
+  ) -> anyhow::Result<Rect> {
+    let viewport = self.to_rect()?;
+
+    Ok(Rect::from_xy(
+      scrolling::parked_x(
+        column_rect.x(),
+        column_rect.width(),
+        viewport.x(),
+        viewport.width(),
+      ),
+      column_rect.y(),
+      column_rect.width(),
+      column_rect.height(),
+    ))
+  }
+
+  /// Gets a rect for the given container that lies fully on-screen.
+  ///
+  /// Rects of containers in columns that aren't fully within the viewport
+  /// are parked within the viewport. Other rects are returned as-is.
+  pub fn on_screen_rect(
+    &self,
+    container: &Container,
+    rect: Rect,
+  ) -> anyhow::Result<Rect> {
+    let Some(column) = self.column_of(container) else {
+      return Ok(rect);
+    };
+
+    match self.column_visibility(&column)? {
+      Some(ColumnVisibility::Full) | None => Ok(rect),
+      Some(_) => self.parked_column_rect(&rect),
+    }
+  }
+
   /// Scrolls the viewport just enough to fully reveal the focused column,
   /// and keeps the viewport within the bounds of the strip.
   ///
@@ -468,8 +508,8 @@ mod tests {
       set_focused_descendant, wrap_in_split_container,
     },
     models::{
-      Container, Monitor, SplitContainer, TilingContainer, TilingWindow,
-      Workspace,
+      Container, Monitor, NonTilingWindow, SplitContainer,
+      TilingContainer, TilingWindow, Workspace,
     },
     scrolling::ColumnVisibility,
     test_utils::{
@@ -493,6 +533,35 @@ mod tests {
 
   fn window() -> TilingContainer {
     TilingWindow::mock().call().into()
+  }
+
+  #[test]
+  fn child_focus_order_yields_each_child_once() {
+    let workspace =
+      scrolling_workspace(vec![window(), window(), window()]);
+
+    // Bounded with `take` so that a regression fails instead of hanging.
+    assert_eq!(workspace.child_focus_order().take(10).count(), 3);
+  }
+
+  #[test]
+  fn focused_column_skips_focused_non_tiling_windows() {
+    let floating_window = NonTilingWindow::mock().call();
+    let workspace = Workspace::mock()
+      .layout(WorkspaceLayout::Scrolling)
+      .tiling_containers(vec![window(), window()])
+      .non_tiling_windows(vec![floating_window.clone()])
+      .call();
+    Monitor::mock().workspaces(vec![workspace.clone()]).call();
+
+    let second_column = workspace.tiling_children().nth(1).unwrap();
+    set_focused_descendant(&second_column.clone().into(), None);
+    set_focused_descendant(&floating_window.into(), None);
+
+    assert_eq!(
+      workspace.focused_column().map(|column| column.id()),
+      Some(second_column.id())
+    );
   }
 
   #[test]

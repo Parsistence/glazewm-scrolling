@@ -37,23 +37,37 @@ async fn main() -> anyhow::Result<()> {
         err
       );
 
-      let managed_windows =
-        managed_handles.into_iter().map(NativeWindow::from_handle);
-
-      for window in managed_windows {
-        if let Err(err) = window.show() {
-          tracing::warn!("Failed to show window: {:?}", err);
-        }
-
-        let _ = window.set_taskbar_visibility(true);
-        let _ = window.set_border_color(None);
-        let _ =
-          window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
-      }
+      // Restore on a dedicated thread, so that the thread's COM state is
+      // torn down when the thread exits. Tearing down COM during process
+      // exit instead can deadlock, leaving the watcher running forever.
+      std::thread::spawn(move || restore_windows(managed_handles))
+        .join()
+        .map_err(|_| anyhow::anyhow!("Window restoration panicked."))?;
     }
   }
 
   Ok(())
+}
+
+/// Makes the given windows visible again and resets their effects.
+fn restore_windows(handles: Vec<isize>) {
+  for window in handles.into_iter().map(NativeWindow::from_handle) {
+    if let Err(err) = window.show() {
+      tracing::warn!("Failed to show window: {:?}", err);
+    }
+
+    // Windows on hidden workspaces and in scrolled-out columns are cloaked
+    // by the WM.
+    if window.is_cloaked().unwrap_or(false) {
+      if let Err(err) = window.set_cloaked(false) {
+        tracing::warn!("Failed to uncloak window: {:?}", err);
+      }
+    }
+
+    let _ = window.set_taskbar_visibility(true);
+    let _ = window.set_border_color(None);
+    let _ = window.set_transparency(&OpacityValue::from_alpha(u8::MAX));
+  }
 }
 
 async fn query_initial_windows(

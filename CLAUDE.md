@@ -51,7 +51,8 @@ Other:
 
 ```sh
 cargo build                          # default members: wm, wm-cli
-cargo run                            # runs the wm
+cargo build -p wm-watcher            # once; `cargo run` doesn't build it, and without it crashed sessions leave windows hidden
+cargo run -- start --verbose         # runs the wm (debug logs); stop a hung instance with `Stop-Process -Name glazewm -Force`
 cargo test                           # all tests
 cargo test -p wm                     # one crate
 cargo test -p wm <test_name_substr>  # single test
@@ -85,7 +86,7 @@ cargo test -p wm <test_name_substr>  # single test
 - Every size/tree helper branches on this: `attach_container` (default width), `detach_container` (no redistribution), `resize_tiling_container` (independent clamp), `flatten_split_container`/`wrap_in_split_container` (preserve column width), `flatten_child_split_containers` (never inverts a scrolling workspace's direction), `container_to_resize`. New code touching sizes must respect this.
 - Pure geometry (spans, reveal, clamp, visibility, presets) lives in `packages/wm/src/scrolling.rs`; column rects come from `traits::scrolling_column_rect`.
 - `platform_sync` calls `update_scroll_offsets` before redrawing: viewport minimally scrolls to the workspace's most recently focused column (view is derived from focus). Use `Workspace::tiling_insertion_point` to insert tiling windows (column-level in scrolling workspaces).
-- Columns fully outside the viewport are cloaked in place (Windows; any `hide_method`), stay in the taskbar, and drive `DisplayState` like hidden workspaces. Never park them off-screen: DWM thumbnails of off-screen windows freeze (verified), and peek previews (planned) depend on live thumbnails.
+- Columns fully outside the viewport are cloaked (Windows; any `hide_method`) and parked *within* the viewport (`Workspace::parked_column_rect`), stay in the taskbar, and drive `DisplayState` like hidden workspaces. Never leave them off-screen: DWM thumbnails of off-screen windows freeze (verified), peek previews (planned) depend on live thumbnails, and off-screen windows are unreachable if the WM dies. Shutdown (`WmState::drop`) and `wm-watcher` uncloak windows.
 - Scrolling commands: `commands/scrolling/` (`scroll`, `consume-into-column`, `expel-from-column`, `cycle-column-width`, `set-layout`, `toggle-layout`). `move left/right` swaps whole columns.
 
 **Hiding windows.** Windows on non-displayed workspaces are hidden by `reposition_window` in `platform_sync.rs` — moved to a monitor "hide corner" (`HideCorner`, leaving a `VISIBLE_SLIVER`) or cloaked (Windows), per `HideMethod` config. `DisplayState` (Shown/Showing/Hiding/Hidden) tracks transitions so resulting platform events can be ignored.

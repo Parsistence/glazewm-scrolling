@@ -159,6 +159,30 @@ pub fn column_visibility(
   }
 }
 
+/// Gets the x-coordinate at which to park a column that is outside the
+/// viewport, so that it stays within the viewport (and thus on its
+/// monitor) while hidden.
+///
+/// Columns left of the viewport are aligned to its left edge, and columns
+/// right of it to its right edge. Columns wider than the viewport are
+/// aligned to the left edge.
+///
+/// Parking hidden columns on-screen keeps their DWM thumbnails live, and
+/// keeps them reachable if the WM exits without restoring them.
+#[must_use]
+pub fn parked_x(
+  column_x: i32,
+  column_width: i32,
+  viewport_x: i32,
+  viewport_width: i32,
+) -> i32 {
+  if column_x < viewport_x || column_width >= viewport_width {
+    viewport_x
+  } else {
+    viewport_x + viewport_width - column_width
+  }
+}
+
 /// Gets the next size in `presets` after `current`, wrapping around to
 /// the smallest preset.
 ///
@@ -286,6 +310,14 @@ mod tests {
       column_visibility(span, -600, 1000),
       ColumnVisibility::Hidden
     );
+  }
+
+  #[test]
+  fn parked_columns_stay_within_viewport() {
+    // Viewport spans 100..1100.
+    assert_eq!(parked_x(-900, 500, 100, 1000), 100);
+    assert_eq!(parked_x(1500, 500, 100, 1000), 600);
+    assert_eq!(parked_x(1500, 1200, 100, 1000), 100);
   }
 
   #[test]

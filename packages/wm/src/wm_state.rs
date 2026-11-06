@@ -687,8 +687,17 @@ impl Drop for WmState {
 
     for window in &managed_windows {
       // Redraw windows to their intended positions. On macOS, this will
-      // unhide windows that are on other workspaces.
-      if let Ok(rect) = window.to_rect() {
+      // unhide windows that are on other workspaces. Windows in columns
+      // outside a scrolling workspace's viewport are moved on-screen.
+      let rect =
+        window.to_rect().and_then(|rect| match window.workspace() {
+          Some(workspace) if workspace.is_scrolling() => {
+            workspace.on_screen_rect(&window.clone().into(), rect)
+          }
+          _ => Ok(rect),
+        });
+
+      if let Ok(rect) = rect {
         if let Err(err) = window.native().set_frame(&rect) {
           warn!("Failed to redraw window on cleanup: {:?}", err);
         }
@@ -699,6 +708,14 @@ impl Drop for WmState {
       {
         if let Err(err) = window.native().show() {
           warn!("Failed to show window: {:?}", err);
+        }
+
+        // Windows on hidden workspaces and in scrolled-out columns are
+        // cloaked.
+        if window.native().is_cloaked().unwrap_or(false) {
+          if let Err(err) = window.native().set_cloaked(false) {
+            warn!("Failed to uncloak window: {:?}", err);
+          }
         }
 
         let _ = window.native().set_taskbar_visibility(true);
