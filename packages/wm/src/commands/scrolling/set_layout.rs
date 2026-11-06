@@ -1,5 +1,5 @@
 use tracing::info;
-use wm_common::{TilingDirection, WmEvent, WorkspaceLayout};
+use wm_common::{TilingDirection, WorkspaceLayout};
 
 use crate::{
   commands::container::flatten_child_split_containers,
@@ -23,13 +23,11 @@ pub fn set_layout(
   info!("Setting layout of {workspace} to {layout:?}.");
   apply_layout(workspace, layout)?;
 
+  // A `WorkspaceUpdated` event is emitted on the next platform sync, since
+  // the layout is part of the broadcast scroll state.
   state
     .pending_sync
     .queue_containers_to_redraw(workspace.tiling_children());
-
-  state.emit_event(WmEvent::WorkspaceUpdated {
-    updated_workspace: workspace.to_dto()?,
-  });
 
   Ok(())
 }

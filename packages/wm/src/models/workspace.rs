@@ -7,8 +7,8 @@ use std::{
 use anyhow::Context;
 use uuid::Uuid;
 use wm_common::{
-  ContainerDto, GapsConfig, ScrollingConfig, TilingDirection,
-  WorkspaceConfig, WorkspaceDto, WorkspaceLayout,
+  ColumnDto, ContainerDto, GapsConfig, ScrollingConfig, ScrollingStateDto,
+  TilingDirection, WorkspaceConfig, WorkspaceDto, WorkspaceLayout,
 };
 use wm_platform::{LengthUnit, LengthValue, Rect, RectDelta};
 
@@ -43,6 +43,11 @@ struct WorkspaceInner {
   /// Horizontal scroll position of the viewport within the column strip
   /// (in pixels). Only used by the scrolling layout.
   scroll_offset: i32,
+
+  /// Layout and scroll state that was last broadcast over IPC. Used to
+  /// only emit events when the state changes.
+  broadcast_scroll_state:
+    Option<(WorkspaceLayout, Option<ScrollingStateDto>)>,
 }
 
 impl Workspace {
@@ -73,6 +78,7 @@ impl Workspace {
       layout,
       scrolling_config,
       scroll_offset: 0,
+      broadcast_scroll_state: None,
     };
 
     Self(Rc::new(RefCell::new(workspace)))
@@ -472,7 +478,57 @@ impl Workspace {
       x: rect.x(),
       y: rect.y(),
       tiling_direction: self.tiling_direction(),
+      layout: self.layout(),
+      scrolling: self.scrolling_state_dto()?,
     }))
+  }
+
+  /// Gets the scroll state of the workspace for IPC. Returns `None` for
+  /// workspaces that don't use the scrolling layout.
+  pub fn scrolling_state_dto(
+    &self,
+  ) -> anyhow::Result<Option<ScrollingStateDto>> {
+    if !self.is_scrolling() {
+      return Ok(None);
+    }
+
+    let column_spans = self.column_spans()?;
+    let spans = column_spans
+      .iter()
+      .map(|(_, span)| *span)
+      .collect::<Vec<_>>();
+
+    Ok(Some(ScrollingStateDto {
+      scroll_offset: self.scroll_offset(),
+      strip_width: scrolling::strip_width(&spans),
+      columns: column_spans
+        .iter()
+        .map(|(column, span)| ColumnDto {
+          id: column.id(),
+          start: span.start,
+          width: span.width,
+        })
+        .collect(),
+      focused_column_id: self.focused_column().map(|column| column.id()),
+    }))
+  }
+
+  /// Records the layout and scroll state last broadcast over IPC.
+  ///
+  /// Returns whether the state differs from the previously recorded one,
+  /// i.e. whether subscribers need to be notified.
+  pub fn record_broadcast_scroll_state(
+    &self,
+    scroll_state: (WorkspaceLayout, Option<ScrollingStateDto>),
+  ) -> bool {
+    let mut inner = self.0.borrow_mut();
+
+    if inner.broadcast_scroll_state.as_ref() == Some(&scroll_state) {
+      return false;
+    }
+
+    inner.broadcast_scroll_state = Some(scroll_state);
+    true
   }
 }
 
@@ -533,6 +589,49 @@ mod tests {
 
   fn window() -> TilingContainer {
     TilingWindow::mock().call().into()
+  }
+
+  #[test]
+  fn scrolling_state_describes_strip_and_focus() {
+    let workspace =
+      scrolling_workspace(vec![window(), window(), window()]);
+    let half_width = MOCK_MONITOR_WIDTH / 2;
+    let third_column = workspace.tiling_children().nth(2).unwrap();
+    set_focused_descendant(&third_column.clone().into(), None);
+    workspace.update_scroll_offset().unwrap();
+
+    let state = workspace.scrolling_state_dto().unwrap().unwrap();
+
+    assert_eq!(state.scroll_offset, half_width);
+    assert_eq!(state.strip_width, half_width * 3);
+    assert_eq!(state.columns.len(), 3);
+    assert_eq!(state.columns[2].start, half_width * 2);
+    assert_eq!(state.columns[2].width, half_width);
+    assert_eq!(state.focused_column_id, Some(third_column.id()));
+  }
+
+  #[test]
+  fn tiling_workspaces_have_no_scrolling_state() {
+    let workspace = Workspace::mock().call();
+    Monitor::mock().workspaces(vec![workspace.clone()]).call();
+
+    assert!(workspace.scrolling_state_dto().unwrap().is_none());
+  }
+
+  #[test]
+  fn broadcast_state_only_reports_changes() {
+    let workspace =
+      scrolling_workspace(vec![window(), window(), window()]);
+    let snapshot = |workspace: &Workspace| {
+      (workspace.layout(), workspace.scrolling_state_dto().unwrap())
+    };
+
+    assert!(workspace.record_broadcast_scroll_state(snapshot(&workspace)));
+    assert!(!workspace.record_broadcast_scroll_state(snapshot(&workspace)));
+
+    let first_column = workspace.tiling_children().next().unwrap();
+    first_column.set_tiling_size(0.67);
+    assert!(workspace.record_broadcast_scroll_state(snapshot(&workspace)));
   }
 
   #[test]

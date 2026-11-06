@@ -76,7 +76,31 @@ pub fn platform_sync(
     }
   }
 
+  broadcast_scroll_state_changes(state)?;
+
   state.pending_sync.clear();
+
+  Ok(())
+}
+
+/// Emits a `WorkspaceUpdated` event for each workspace whose layout or
+/// scroll state (scroll offset, column sizes, focused column) changed
+/// since it was last broadcast.
+///
+/// Bars (e.g. Zebar) use these events to keep scroll indicators in sync.
+fn broadcast_scroll_state_changes(
+  state: &mut WmState,
+) -> anyhow::Result<()> {
+  for workspace in state.workspaces() {
+    let scroll_state =
+      (workspace.layout(), workspace.scrolling_state_dto()?);
+
+    if workspace.record_broadcast_scroll_state(scroll_state) {
+      state.emit_event(WmEvent::WorkspaceUpdated {
+        updated_workspace: workspace.to_dto()?,
+      });
+    }
+  }
 
   Ok(())
 }
