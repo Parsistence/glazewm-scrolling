@@ -1,3 +1,6 @@
+> [!NOTE]
+> **GlazeWM Scrolling** is a fork of GlazeWM that adds a PaperWM-style scrolling layout, and installs side-by-side with upstream GlazeWM. See [SCROLLING.md](SCROLLING.md) for what's different. The rest of this README is upstream's.
+
 <div align="center">
 
 > V3 is finally out - check out the changelog [here](https://github.com/glzr-io/GlazeWM/releases) 🔥
