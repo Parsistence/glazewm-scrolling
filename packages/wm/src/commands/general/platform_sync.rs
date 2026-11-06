@@ -12,7 +12,8 @@ use wm_platform::{CornerStyle, OpacityValue};
 use wm_platform::{Rect, WindowZOrder};
 
 use crate::{
-  models::{Container, WindowContainer},
+  models::{Container, WindowContainer, Workspace},
+  scrolling::ColumnVisibility,
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
   wm_state::WmState,
@@ -28,6 +29,8 @@ pub fn platform_sync(
   if state.pending_sync.needs_focus_update() {
     sync_focus(&focused_container, state)?;
   }
+
+  update_scroll_offsets(state)?;
 
   if !state.pending_sync.containers_to_redraw().is_empty()
     || !state.pending_sync.workspaces_to_reorder().is_empty()
@@ -76,6 +79,54 @@ pub fn platform_sync(
   state.pending_sync.clear();
 
   Ok(())
+}
+
+/// Scrolls displayed workspaces with the scrolling layout to reveal their
+/// focused column, and queues their columns for redraw if the viewport
+/// moved.
+fn update_scroll_offsets(state: &mut WmState) -> anyhow::Result<()> {
+  let scrolling_workspaces =
+    state.workspaces().into_iter().filter(|workspace| {
+      workspace.is_scrolling() && workspace.is_displayed()
+    });
+
+  for workspace in scrolling_workspaces {
+    if workspace.update_scroll_offset()? {
+      state
+        .pending_sync
+        .queue_containers_to_redraw(workspace.tiling_children());
+    }
+  }
+
+  Ok(())
+}
+
+/// Whether a window is a tiling window in a scrolling workspace whose
+/// column lies entirely outside the viewport.
+///
+/// # Platform-specific
+///
+/// - **macOS**: Always `false`; scrolled-out columns are left positioned
+///   outside the viewport, since windows can't be cloaked.
+fn is_scrolled_out(
+  window: &WindowContainer,
+  workspace: &Workspace,
+) -> anyhow::Result<bool> {
+  if cfg!(target_os = "macos")
+    || !workspace.is_scrolling()
+    || !window.is_tiling_window()
+  {
+    return Ok(false);
+  }
+
+  let Some(column) = workspace.column_of(&window.clone().into()) else {
+    return Ok(false);
+  };
+
+  Ok(
+    workspace.column_visibility(&column)?
+      == Some(ColumnVisibility::Hidden),
+  )
 }
 
 fn sync_focus(
@@ -266,10 +317,18 @@ fn redraw_containers(
       continue;
     }
 
+    // Windows in scrolled-out columns are hidden even though their
+    // workspace is displayed.
+    let is_scrolled_out =
+      workspace.is_displayed() && is_scrolled_out(window, &workspace)?;
+
     // Transition display state depending on whether window will be
     // shown or hidden.
     window.set_display_state(
-      match (window.display_state(), workspace.is_displayed()) {
+      match (
+        window.display_state(),
+        workspace.is_displayed() && !is_scrolled_out,
+      ) {
         (DisplayState::Hidden | DisplayState::Hiding, true) => {
           DisplayState::Showing
         }
@@ -285,9 +344,14 @@ fn redraw_containers(
       DisplayState::Showing | DisplayState::Shown
     );
 
-    if let Err(err) =
-      reposition_window(window, *hide_corner, &z_order, is_visible, config)
-    {
+    if let Err(err) = reposition_window(
+      window,
+      *hide_corner,
+      &z_order,
+      is_visible,
+      is_scrolled_out,
+      config,
+    ) {
       tracing::warn!("Failed to set window position: {}", err);
     }
 
@@ -316,7 +380,8 @@ fn redraw_containers(
     // Skip setting taskbar visibility if the window is hidden (has no
     // effect). Since cloaked windows are normally always visible in the
     // taskbar, we only need to set visibility if `show_all_in_taskbar` is
-    // `false`.
+    // `false`. Scrolled-out windows stay in the taskbar so that they can
+    // be scrolled to by clicking them.
     #[cfg(target_os = "windows")]
     if config.value.general.hide_method == HideMethod::Cloak
       && !config.value.general.show_all_in_taskbar
@@ -325,7 +390,9 @@ fn redraw_containers(
         DisplayState::Showing | DisplayState::Hiding
       )
     {
-      if let Err(err) = window.native().set_taskbar_visibility(is_visible)
+      if let Err(err) = window
+        .native()
+        .set_taskbar_visibility(is_visible || is_scrolled_out)
       {
         tracing::warn!("Failed to set taskbar visibility: {}", err);
       }
@@ -335,6 +402,11 @@ fn redraw_containers(
   Ok(())
 }
 
+/// Moves and resizes a window to its target rect, and shows or hides it.
+///
+/// Windows in scrolled-out columns (`is_scrolled_out`) are kept at their
+/// position in the strip and cloaked, regardless of the hide method. This
+/// keeps their DWM thumbnails live and them visible in the taskbar.
 fn reposition_window(
   window: &WindowContainer,
   hide_corner: HideCorner,
@@ -342,16 +414,20 @@ fn reposition_window(
   #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   z_order: &WindowZOrder,
   is_visible: bool,
+  // LINT: `is_scrolled_out` is only used on Windows.
+  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+  is_scrolled_out: bool,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   let rect = window
     .to_rect()?
     .apply_delta(&window.total_border_delta()?, None);
 
-  // For `HideMethod::PlaceInCorner`, we need to reposition hidden windows
-  // to the corner of the monitor.
+  // For `HideMethod::PlaceInCorner`, we need to reposition windows on
+  // hidden workspaces to the corner of the monitor.
   if config.value.general.hide_method == HideMethod::PlaceInCorner
     && !is_visible
+    && !is_scrolled_out
   {
     const VISIBLE_SLIVER: i32 = 1;
 
@@ -457,13 +533,25 @@ fn reposition_window(
         }
       }
 
-      // Set visibility based on the hide method.
+      // Set visibility based on the hide method. Scrolled-out windows are
+      // always cloaked (and otherwise shown). The order of calls avoids
+      // the window briefly flashing into view.
       if config.value.general.hide_method == HideMethod::Cloak {
         window.native().set_cloaked(!is_visible)?;
-      } else if is_visible {
+      } else if is_scrolled_out {
+        window.native().set_cloaked(true)?;
         window.native().show()?;
       } else {
-        window.native().hide()?;
+        if is_visible {
+          window.native().show()?;
+        } else {
+          window.native().hide()?;
+        }
+
+        // Uncloak windows that were previously scrolled out.
+        if window.native().is_cloaked().unwrap_or(false) {
+          window.native().set_cloaked(false)?;
+        }
       }
     }
   }

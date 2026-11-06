@@ -5,6 +5,7 @@ use wm_platform::{LengthValue, Rect};
 use crate::{
   commands::container::resize_tiling_container,
   models::{NonTilingWindow, TilingWindow, WindowContainer},
+  scrolling,
   traits::{
     CommonGetters, PositionGetters, TilingSizeGetters, WindowGetters,
   },
@@ -70,6 +71,29 @@ fn set_tiling_window_length(
 
   if let Some(container_to_resize) = container_to_resize {
     let parent = container_to_resize.parent().context("No parent.")?;
+
+    // Columns of scrolling workspaces are sized relative to the viewport.
+    if let Some(workspace) = container_to_resize.scrolling_parent() {
+      let viewport_width = workspace.to_rect()?.width();
+      let target_px = target_length.to_px(viewport_width, None);
+      let column_size = scrolling::column_size_from_px(
+        target_px,
+        viewport_width,
+        workspace.column_gap(),
+      );
+
+      if (container_to_resize.tiling_size() - column_size).abs()
+        > f32::EPSILON
+      {
+        resize_tiling_container(&container_to_resize, column_size);
+
+        state
+          .pending_sync
+          .queue_containers_to_redraw(workspace.tiling_children());
+      }
+
+      return Ok(());
+    }
     let (horizontal_gap, vertical_gap) =
       container_to_resize.inner_gaps()?;
 

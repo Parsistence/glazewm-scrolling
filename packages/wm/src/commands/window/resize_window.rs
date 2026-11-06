@@ -18,6 +18,17 @@ pub fn resize_window(
   let target_width = match width_delta {
     Some(delta) => {
       let parent_width = match window.as_tiling_container() {
+        // Percentage deltas of columns are relative to the viewport.
+        Ok(tiling_window)
+          if tiling_window.container_to_resize(true)?.is_some_and(
+            |container| container.scrolling_parent().is_some(),
+          ) =>
+        {
+          tiling_window
+            .scrolling_workspace()
+            .and_then(|workspace| workspace.to_rect().ok())
+            .map(|rect| rect.width())
+        }
         Ok(tiling_window) => tiling_window
           .container_to_resize(true)?
           .and_then(|container| container.parent())

@@ -11,11 +11,14 @@ use crate::{
 /// into the parent container.
 ///
 /// The children will be resized to fit the size of the split container.
+/// When flattening a column of a scrolling workspace, each child instead
+/// becomes a column with the split container's width.
 #[allow(clippy::needless_pass_by_value)]
 pub fn flatten_split_container(
   split_container: SplitContainer,
 ) -> anyhow::Result<()> {
   let parent = split_container.parent().context("No parent.")?;
+  let is_scrolling_column = split_container.scrolling_parent().is_some();
 
   let updated_children =
     split_container.children().into_iter().inspect(|child| {
@@ -23,9 +26,11 @@ pub fn flatten_split_container(
 
       // Resize tiling children to fit the size of the split container.
       if let Ok(tiling_child) = child.as_tiling_container() {
-        tiling_child.set_tiling_size(
-          split_container.tiling_size() * tiling_child.tiling_size(),
-        );
+        tiling_child.set_tiling_size(if is_scrolling_column {
+          split_container.tiling_size()
+        } else {
+          split_container.tiling_size() * tiling_child.tiling_size()
+        });
       }
     });
 

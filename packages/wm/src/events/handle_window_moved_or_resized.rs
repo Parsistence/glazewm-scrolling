@@ -16,6 +16,7 @@ use crate::{
   },
   events::handle_window_moved_or_resized_end,
   models::{Monitor, NonTilingWindow, WindowContainer},
+  scrolling::ColumnVisibility,
   traits::{CommonGetters, WindowGetters},
   user_config::UserConfig,
   wm_state::WmState,
@@ -225,7 +226,24 @@ pub fn handle_window_moved_or_resized(
       }
     }
 
-    let should_fullscreen = {
+    // Columns of scrolling workspaces that aren't fully within the
+    // viewport can extend onto other monitors. These shouldn't be mistaken
+    // for windows entering fullscreen on those monitors.
+    let is_outside_viewport = match &window {
+      WindowContainer::TilingWindow(tiling_window) => tiling_window
+        .scrolling_workspace()
+        .is_some_and(|workspace| {
+          workspace
+            .column_of(&window.clone().into())
+            .and_then(|column| {
+              workspace.column_visibility(&column).ok().flatten()
+            })
+            .is_some_and(|visibility| visibility != ColumnVisibility::Full)
+        }),
+      WindowContainer::NonTilingWindow(_) => false,
+    };
+
+    let should_fullscreen = !is_outside_viewport && {
       let workspace = nearest_monitor
         .displayed_workspace()
         .context("No workspace.")?;

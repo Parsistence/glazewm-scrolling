@@ -380,3 +380,52 @@ impl UserConfig {
     })
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use wm_common::{InvokeCommand, ParsedConfig, WorkspaceLayout};
+  use wm_platform::{LengthUnit, LengthValue};
+
+  use super::SAMPLE_CONFIG;
+
+  #[test]
+  fn sample_config_parses_with_scrolling_defaults() {
+    let config: ParsedConfig =
+      serde_yaml::from_str(SAMPLE_CONFIG).unwrap();
+
+    let scrolling = &config.general.scrolling;
+    assert_eq!(
+      scrolling.default_column_width,
+      LengthValue {
+        amount: 0.5,
+        unit: LengthUnit::Percentage,
+      }
+    );
+    assert_eq!(scrolling.column_width_presets.len(), 4);
+
+    assert!(config
+      .workspaces
+      .iter()
+      .all(|workspace| workspace.layout == WorkspaceLayout::Scrolling));
+
+    let has_command = |expected: &InvokeCommand| {
+      config
+        .keybindings
+        .iter()
+        .any(|keybinding| keybinding.commands.contains(expected))
+    };
+    assert!(has_command(&InvokeCommand::ToggleLayout));
+    assert!(has_command(&InvokeCommand::CycleColumnWidth));
+  }
+
+  #[test]
+  fn workspace_layout_can_be_set_per_workspace() {
+    let config: ParsedConfig = serde_yaml::from_str(
+      "workspaces:\n  - name: '1'\n    layout: 'tiling'\n  - name: '2'\n",
+    )
+    .unwrap();
+
+    assert_eq!(config.workspaces[0].layout, WorkspaceLayout::Tiling);
+    assert_eq!(config.workspaces[1].layout, WorkspaceLayout::Scrolling);
+  }
+}

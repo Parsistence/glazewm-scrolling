@@ -1,12 +1,24 @@
 use crate::{
   models::TilingContainer,
+  scrolling,
   traits::{CommonGetters, TilingSizeGetters, MIN_TILING_SIZE},
 };
 
+/// Resizes a tiling container to the target size, shrinking or growing
+/// its siblings to compensate.
+///
+/// Columns of scrolling workspaces are resized independently of their
+/// siblings.
 pub fn resize_tiling_container(
   container_to_resize: &TilingContainer,
   target_size: f32,
 ) {
+  if container_to_resize.scrolling_parent().is_some() {
+    container_to_resize
+      .set_tiling_size(scrolling::clamp_column_size(target_size));
+    return;
+  }
+
   let tiling_siblings =
     container_to_resize.tiling_siblings().collect::<Vec<_>>();
 

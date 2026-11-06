@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use wm_platform::{
-  Color, CornerStyle, Key, Keybinding, LengthValue, OpacityValue,
-  RectDelta,
+  Color, CornerStyle, Key, Keybinding, LengthUnit, LengthValue,
+  OpacityValue, RectDelta,
 };
 
-use crate::app_command::InvokeCommand;
+use crate::{app_command::InvokeCommand, WorkspaceLayout};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all(serialize = "camelCase"))]
@@ -96,6 +96,9 @@ pub struct GeneralConfig {
 
   /// Affects which windows get shown in the native Windows taskbar.
   pub show_all_in_taskbar: bool,
+
+  /// Config for workspaces using the scrolling layout.
+  pub scrolling: ScrollingConfig,
 }
 
 impl Default for GeneralConfig {
@@ -118,6 +121,37 @@ impl Default for GeneralConfig {
         }
       },
       show_all_in_taskbar: false,
+      scrolling: ScrollingConfig::default(),
+    }
+  }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase"))]
+pub struct ScrollingConfig {
+  /// Width of newly created columns, relative to the workspace width when
+  /// given as a percentage.
+  pub default_column_width: LengthValue,
+
+  /// Widths cycled through by the `cycle-column-width` command.
+  pub column_width_presets: Vec<LengthValue>,
+}
+
+impl Default for ScrollingConfig {
+  fn default() -> Self {
+    let percentage = |amount| LengthValue {
+      amount,
+      unit: LengthUnit::Percentage,
+    };
+
+    ScrollingConfig {
+      default_column_width: percentage(0.5),
+      column_width_presets: vec![
+        percentage(0.33),
+        percentage(0.5),
+        percentage(0.67),
+        percentage(1.0),
+      ],
     }
   }
 }
@@ -385,6 +419,10 @@ pub struct WorkspaceConfig {
 
   #[serde(default = "default_bool::<false>")]
   pub keep_alive: bool,
+
+  /// Layout that the workspace starts with when activated.
+  #[serde(default)]
+  pub layout: WorkspaceLayout,
 }
 
 /// Helper function for setting a default value for a boolean field.

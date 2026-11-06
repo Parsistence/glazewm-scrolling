@@ -25,6 +25,10 @@ use crate::{
       platform_sync, reload_config, shell_exec, toggle_pause,
     },
     monitor::focus_monitor,
+    scrolling::{
+      consume_into_column, cycle_column_width, expel_from_column,
+      scroll_in_direction, set_layout,
+    },
     window::{
       ignore_window, move_window_in_direction, move_window_to_workspace,
       resize_window, set_window_position, set_window_size,
@@ -734,6 +738,40 @@ impl WindowManager {
       }
       InvokeCommand::ToggleTilingDirection => {
         toggle_tiling_direction(subject_container, state, config)
+      }
+      InvokeCommand::ConsumeIntoColumn { direction } => {
+        match subject_container.as_tiling_window() {
+          Some(window) => {
+            consume_into_column(window, direction, state, config)
+          }
+          _ => Ok(()),
+        }
+      }
+      InvokeCommand::CycleColumnWidth => {
+        cycle_column_width(&subject_container, state);
+        Ok(())
+      }
+      InvokeCommand::ExpelFromColumn { direction } => {
+        match subject_container.as_tiling_window() {
+          Some(window) => expel_from_column(window, direction, state),
+          _ => Ok(()),
+        }
+      }
+      InvokeCommand::Scroll { direction } => {
+        scroll_in_direction(&subject_container, direction, state);
+        Ok(())
+      }
+      InvokeCommand::SetLayout { layout } => {
+        let workspace =
+          subject_container.workspace().context("No workspace.")?;
+
+        set_layout(&workspace, *layout, state)
+      }
+      InvokeCommand::ToggleLayout => {
+        let workspace =
+          subject_container.workspace().context("No workspace.")?;
+
+        set_layout(&workspace, workspace.layout().toggled(), state)
       }
       InvokeCommand::SetTilingDirection { tiling_direction } => {
         set_tiling_direction(

@@ -61,24 +61,24 @@ fn set_tiling(
   // Get the position in the tree to insert the new tiling window. This
   // will be the window's previous tiling position if it has one, or
   // instead beside the last focused tiling window in the workspace.
-  let (target_parent, target_index) = insertion_target
-    .as_ref()
-    .map(|insertion_target| {
-      (
-        insertion_target.target_parent.clone(),
-        insertion_target.target_index,
-      )
-    })
-    // Fallback to the last focused tiling window within the workspace.
-    .or_else(|| {
-      let focused_window = workspace
-        .descendant_focus_order()
-        .find(Container::is_tiling_window)?;
+  let (target_parent, target_index) =
+    insertion_target.as_ref().map_or_else(
+      // Fallback to the last focused tiling window within the workspace,
+      // or otherwise to the end of the workspace.
+      || {
+        let focused_window = workspace
+          .descendant_focus_order()
+          .find(Container::is_tiling_window);
 
-      Some((focused_window.parent()?, focused_window.index() + 1))
-    })
-    // Default to inserting at the end of the workspace.
-    .unwrap_or((workspace.clone().into(), workspace.child_count()));
+        workspace.tiling_insertion_point(focused_window.as_ref())
+      },
+      |insertion_target| {
+        (
+          insertion_target.target_parent.clone(),
+          insertion_target.target_index,
+        )
+      },
+    );
 
   let tiling_window = window.to_tiling(config.value.gaps.clone());
 
@@ -96,16 +96,30 @@ fn set_tiling(
     state,
   )?;
 
+  let is_scrolling_column = tiling_window.scrolling_parent().is_some();
+
   #[allow(clippy::cast_precision_loss)]
   if let Some(insertion_target) = &insertion_target {
-    let size_scale = (insertion_target.prev_sibling_count + 1) as f32
-      / (tiling_window.tiling_siblings().count() + 1) as f32;
+    // Restore the previous column width. Sizes can't be carried over if
+    // the window moves between a column and a split container (e.g. if
+    // the workspace's layout has since changed).
+    if is_scrolling_column || insertion_target.was_scrolling_column {
+      if is_scrolling_column && insertion_target.was_scrolling_column {
+        resize_tiling_container(
+          &tiling_window.clone().into(),
+          insertion_target.prev_tiling_size,
+        );
+      }
+    } else {
+      let size_scale = (insertion_target.prev_sibling_count + 1) as f32
+        / (tiling_window.tiling_siblings().count() + 1) as f32;
 
-    // Scale the window's previous size based on the current number of
-    // siblings. E.g. if the window was 0.5 with 1 sibling, and now has 2
-    // siblings, scale to 0.5 * (2/3) to maintain proportional sizing.
-    let target_size = insertion_target.prev_tiling_size * size_scale;
-    resize_tiling_container(&tiling_window.clone().into(), target_size);
+      // Scale the window's previous size based on the current number of
+      // siblings. E.g. if the window was 0.5 with 1 sibling, and now has 2
+      // siblings, scale to 0.5 * (2/3) to maintain proportional sizing.
+      let target_size = insertion_target.prev_tiling_size * size_scale;
+      resize_tiling_container(&tiling_window.clone().into(), target_size);
+    }
   }
 
   state
@@ -171,6 +185,7 @@ fn set_non_tiling(
           target_index: window.index(),
           prev_tiling_size: window.tiling_size(),
           prev_sibling_count: window.tiling_siblings().count(),
+          was_scrolling_column: window.scrolling_parent().is_some(),
         }),
       );
 

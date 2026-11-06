@@ -8,7 +8,9 @@ use crate::{
 
 /// Inserts a child container at the specified index.
 ///
-/// The inserted child will be resized to fit the available space.
+/// The inserted child will be resized to fit the available space. Columns
+/// of scrolling workspaces instead get the workspace's default column
+/// size, leaving their siblings untouched.
 pub fn attach_container(
   child: &Container,
   target_parent: &Container,
@@ -38,6 +40,11 @@ pub fn attach_container(
 
   // Resize the child and its siblings if it is a tiling container.
   if let Ok(child) = child.as_tiling_container() {
+    if let Some(workspace) = child.scrolling_parent() {
+      child.set_tiling_size(workspace.default_column_size());
+      return Ok(());
+    }
+
     let tiling_siblings = child.tiling_siblings().collect::<Vec<_>>();
 
     if tiling_siblings.is_empty() {

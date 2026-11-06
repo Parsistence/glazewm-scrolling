@@ -13,6 +13,7 @@ mod tiling_direction;
 mod utils;
 mod window_state;
 mod wm_event;
+mod workspace_layout;
 
 pub use active_drag::*;
 pub use app_command::*;
@@ -26,3 +27,4 @@ pub use tiling_direction::*;
 pub use utils::*;
 pub use window_state::*;
 pub use wm_event::*;
+pub use workspace_layout::*;

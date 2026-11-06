@@ -1,9 +1,38 @@
 use ambassador::delegatable_trait;
+use anyhow::Context;
+use uuid::Uuid;
 use wm_platform::Rect;
+
+use crate::{models::Workspace, traits::CommonGetters};
 
 #[delegatable_trait]
 pub trait PositionGetters {
   fn to_rect(&self) -> anyhow::Result<Rect>;
+}
+
+/// Gets the rect of a column within a workspace that uses the scrolling
+/// layout.
+///
+/// The rect is positioned relative to the workspace's scroll offset, and
+/// can therefore lie partially or entirely outside the workspace.
+pub fn scrolling_column_rect(
+  column_id: Uuid,
+  workspace: &Workspace,
+) -> anyhow::Result<Rect> {
+  let viewport = workspace.to_rect()?;
+
+  let (_, span) = workspace
+    .column_spans()?
+    .into_iter()
+    .find(|(column, _)| column.id() == column_id)
+    .context("Column not found in scrolling workspace.")?;
+
+  Ok(Rect::from_xy(
+    viewport.x() - workspace.scroll_offset() + span.start,
+    viewport.y(),
+    span.width,
+    viewport.height(),
+  ))
 }
 
 /// Implements the `PositionGetters` trait for tiling containers that can
@@ -16,6 +45,14 @@ macro_rules! impl_position_getters_as_resizable {
   ($struct_name:ident) => {
     impl PositionGetters for $struct_name {
       fn to_rect(&self) -> anyhow::Result<Rect> {
+        // Columns of scrolling workspaces have independent widths.
+        if let Some(workspace) = self.scrolling_parent() {
+          return $crate::traits::scrolling_column_rect(
+            self.id(),
+            &workspace,
+          );
+        }
+
         let parent = self
           .parent()
           .and_then(|parent| parent.as_direction_container().ok())

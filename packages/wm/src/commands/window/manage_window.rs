@@ -317,6 +317,8 @@ fn window_state_to_create(
 ///   2. If a non-tiling window is focused, try to insert after the first
 ///      tiling window found.
 ///   3. If no tiling windows exist, append to the workspace.
+///   4. In scrolling workspaces, the window is inserted as a new column
+///      after the column of the window from rules 1-2.
 ///
 /// Returns tuple of (parent container, insertion index).
 fn insertion_target(
@@ -340,10 +342,7 @@ fn insertion_target(
     };
 
     if let Some(sibling) = sibling {
-      return Ok((
-        sibling.parent().context("No parent.")?,
-        sibling.index() + 1,
-      ));
+      return Ok(focused_workspace.tiling_insertion_point(Some(&sibling)));
     }
   }
 

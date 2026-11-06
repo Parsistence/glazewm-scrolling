@@ -46,6 +46,12 @@ pub trait TilingSizeGetters: CommonGetters {
     &self,
     is_width_resize: bool,
   ) -> anyhow::Result<Option<TilingContainer>> {
+    // Columns of scrolling workspaces can always be resized horizontally,
+    // since their width is independent of their siblings.
+    if is_width_resize && self.scrolling_parent().is_some() {
+      return Ok(Some(self.as_tiling_container()?));
+    }
+
     let parent = self.direction_container().context("No parent.")?;
 
     let tiling_direction = parent.tiling_direction();

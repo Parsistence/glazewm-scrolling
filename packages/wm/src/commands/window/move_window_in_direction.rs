@@ -9,8 +9,9 @@ use crate::{
     set_focused_descendant, wrap_in_split_container,
   },
   models::{
-    DirectionContainer, Monitor, NonTilingWindow, SplitContainer,
-    TilingContainer, TilingWindow, WindowContainer,
+    Container, DirectionContainer, Monitor, NonTilingWindow,
+    SplitContainer, TilingContainer, TilingWindow, WindowContainer,
+    Workspace,
   },
   traits::{
     CommonGetters, PositionGetters, TilingDirectionGetters, WindowGetters,
@@ -54,6 +55,15 @@ fn move_tiling_window(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  if let Some(workspace) = window_to_move.scrolling_workspace() {
+    return move_scrolling_tiling_window(
+      &window_to_move,
+      &workspace,
+      direction,
+      state,
+    );
+  }
+
   // Flatten the parent split container if it only contains the window.
   if let Some(split_parent) = window_to_move
     .parent()
@@ -124,6 +134,82 @@ fn move_tiling_window(
       state,
     ),
   }
+}
+
+/// Moves a tiling window within a workspace that uses the scrolling
+/// layout.
+///
+/// Moving left/right swaps the window's whole column with the adjacent
+/// column. Moving up/down reorders the window within its column. At the
+/// edge of the strip (or column), the window is moved to the workspace in
+/// the given direction instead.
+fn move_scrolling_tiling_window(
+  window_to_move: &TilingWindow,
+  workspace: &Workspace,
+  direction: &Direction,
+  state: &mut WmState,
+) -> anyhow::Result<()> {
+  let window_container: Container = window_to_move.clone().into();
+
+  let (container_to_swap, parent) = match direction {
+    Direction::Left | Direction::Right => (
+      workspace
+        .column_of(&window_container)
+        .context("Window is not in a column.")?
+        .into(),
+      workspace.clone().into(),
+    ),
+    Direction::Up | Direction::Down => {
+      let parent = window_to_move
+        .direction_container()
+        .context("No direction container.")?;
+
+      // Only reorder within vertically tiled stacks. Columns that are a
+      // single window can only be moved to another workspace.
+      if parent.is_workspace()
+        || parent.tiling_direction() != TilingDirection::Vertical
+      {
+        return move_to_workspace_in_direction(
+          &window_to_move.clone().into(),
+          direction,
+          state,
+        );
+      }
+
+      (window_container.clone(), parent.into())
+    }
+  };
+
+  let sibling = match direction {
+    Direction::Up | Direction::Left => container_to_swap
+      .prev_siblings()
+      .find_map(|sibling| sibling.as_tiling_container().ok()),
+    _ => container_to_swap
+      .next_siblings()
+      .find_map(|sibling| sibling.as_tiling_container().ok()),
+  };
+
+  let Some(sibling) = sibling else {
+    return move_to_workspace_in_direction(
+      &window_to_move.clone().into(),
+      direction,
+      state,
+    );
+  };
+
+  // Swap positions with the sibling.
+  move_container_within_tree(
+    &container_to_swap,
+    &parent,
+    sibling.index(),
+    state,
+  )?;
+
+  state
+    .pending_sync
+    .queue_containers_to_redraw(parent.tiling_children());
+
+  Ok(())
 }
 
 /// Gets the next sibling `TilingWindow` or `SplitContainer` in the given

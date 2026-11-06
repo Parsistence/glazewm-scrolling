@@ -87,27 +87,24 @@ pub fn move_window_to_workspace(
       .filter_map(|descendant| descendant.as_window_container().ok())
       .find(|descendant| descendant.state() == WindowState::Tiling);
 
-    // Insert the window into the target workspace.
-    match (window.is_tiling_window(), insertion_sibling.is_some()) {
-      (true, true) => {
-        if let Some(insertion_sibling) = insertion_sibling {
-          move_container_within_tree(
-            &window.clone().into(),
-            &insertion_sibling.clone().parent().context("No parent.")?,
-            insertion_sibling.index() + 1,
-            state,
-          )?;
-        }
-      }
-      _ => {
-        move_container_within_tree(
-          &window.clone().into(),
-          &target_workspace.clone().into(),
-          target_workspace.child_count(),
-          state,
-        )?;
-      }
-    }
+    // Insert the window into the target workspace. Tiling windows are
+    // placed next to the last focused tiling window.
+    let (target_parent, target_index) = if window.is_tiling_window() {
+      target_workspace
+        .tiling_insertion_point(insertion_sibling.map(Into::into).as_ref())
+    } else {
+      (
+        target_workspace.clone().into(),
+        target_workspace.child_count(),
+      )
+    };
+
+    move_container_within_tree(
+      &window.clone().into(),
+      &target_parent,
+      target_index,
+      state,
+    )?;
 
     // When moving a focused window within the tree to another workspace,
     // the target workspace will get displayed. If moving the window e.g.

@@ -6,7 +6,7 @@ use tracing::Level;
 use uuid::Uuid;
 use wm_platform::{Delta, Direction, LengthValue, OpacityValue};
 
-use crate::{TilingDirection, CLI_BIN_NAME};
+use crate::{TilingDirection, WorkspaceLayout, CLI_BIN_NAME};
 
 const VERSION: &str = env!("VERSION_NUMBER");
 
@@ -158,6 +158,22 @@ pub enum SubscribableEvent {
 pub enum InvokeCommand {
   AdjustBorders(InvokeAdjustBordersCommand),
   Close,
+  /// Moves the focused window into the adjacent column in the given
+  /// direction. Only applies to workspaces with the scrolling layout.
+  ConsumeIntoColumn {
+    #[clap(long)]
+    direction: Direction,
+  },
+  /// Cycles the width of the focused column through the configured
+  /// presets. Only applies to workspaces with the scrolling layout.
+  CycleColumnWidth,
+  /// Moves the focused window out of its column into a new column in the
+  /// given direction. Only applies to workspaces with the scrolling
+  /// layout.
+  ExpelFromColumn {
+    #[clap(long)]
+    direction: Direction,
+  },
   Focus(InvokeFocusCommand),
   Ignore,
   Move(InvokeMoveCommand),
@@ -167,6 +183,12 @@ pub enum InvokeCommand {
   },
   Position(InvokePositionCommand),
   Resize(InvokeResizeCommand),
+  /// Focuses the adjacent column in the given direction without leaving
+  /// the workspace. Only applies to workspaces with the scrolling layout.
+  Scroll {
+    #[clap(long)]
+    direction: Direction,
+  },
   UpdateWorkspaceConfig {
     #[clap(long, allow_hyphen_values = true)]
     workspace: Option<String>,
@@ -199,6 +221,11 @@ pub enum InvokeCommand {
     #[clap(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
     maximized: Option<bool>,
   },
+  /// Sets the layout of the focused workspace.
+  SetLayout {
+    #[clap(required = true, value_enum)]
+    layout: WorkspaceLayout,
+  },
   SetMinimized,
   SetTiling,
   SetTitleBarVisibility {
@@ -215,6 +242,9 @@ pub enum InvokeCommand {
   },
   // Reuse `InvokeResizeCommand` struct.
   Size(InvokeResizeCommand),
+  /// Toggles the focused workspace between the scrolling and tiling
+  /// layouts.
+  ToggleLayout,
   ToggleFloating {
     #[clap(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
     shown_on_top: Option<bool>,

@@ -229,6 +229,21 @@ pub trait CommonGetters {
       .find_map(|container| container.as_workspace().cloned())
   }
 
+  /// Parent workspace if this container is a column of a workspace with
+  /// the scrolling layout (i.e. a direct child of it).
+  fn scrolling_parent(&self) -> Option<Workspace> {
+    self
+      .parent()
+      .and_then(|parent| parent.as_workspace().cloned())
+      .filter(Workspace::is_scrolling)
+  }
+
+  /// Workspace that this container belongs to if the workspace uses the
+  /// scrolling layout.
+  fn scrolling_workspace(&self) -> Option<Workspace> {
+    self.workspace().filter(Workspace::is_scrolling)
+  }
+
   /// Monitor that this container belongs to.
   ///
   /// Note that this might return the container itself.

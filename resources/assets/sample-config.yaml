@@ -40,6 +40,16 @@ general:
   # - 'false': Only show windows from the currently shown workspaces.
   show_all_in_taskbar: false
 
+  # Config for workspaces with the scrolling layout (see `workspaces`).
+  # Columns are arranged left-to-right in a strip that scrolls to keep the
+  # focused column in view. Percentages are relative to the workspace width.
+  scrolling:
+    # Width of newly opened columns.
+    default_column_width: '50%'
+
+    # Widths cycled through by the `cycle-column-width` command.
+    column_width_presets: ['33%', '50%', '67%', '100%']
+
 gaps:
   # Whether to scale the gaps with the DPI of the monitor.
   scale_with_dpi: true
@@ -120,6 +130,10 @@ window_behavior:
       # Whether to show fullscreen windows as always on top.
       shown_on_top: false
 
+# Each workspace can set `layout` to the layout it starts with:
+# - 'scrolling' (default): Columns in a horizontally scrolling strip.
+# - 'tiling': Windows share the workspace's space (upstream GlazeWM).
+# Example: `- name: '1'` followed by `layout: 'tiling'`.
 workspaces:
   - name: '1'
   - name: '2'
@@ -217,9 +231,33 @@ keybindings:
     bindings: ['alt+shift+p']
 
   # Change tiling direction. This determines where new tiling windows will
-  # be inserted.
+  # be inserted. Has no effect on the columns of scrolling workspaces.
   - commands: ['toggle-tiling-direction']
     bindings: ['alt+v']
+
+  # Toggle the focused workspace between the scrolling and tiling layouts.
+  - commands: ['toggle-layout']
+    bindings: ['alt+shift+v']
+
+  # Scrolling layout: stack the focused window into the column to the
+  # left/right, or move it out of its column into a new one.
+  - commands: ['consume-into-column --direction left']
+    bindings: ['alt+oem_comma']
+  - commands: ['consume-into-column --direction right']
+    bindings: ['alt+oem_period']
+  - commands: ['expel-from-column --direction left']
+    bindings: ['alt+shift+oem_comma']
+  - commands: ['expel-from-column --direction right']
+    bindings: ['alt+shift+oem_period']
+
+  # Scrolling layout: cycle the focused column's width through
+  # `column_width_presets`.
+  - commands: ['cycle-column-width']
+    bindings: ['alt+w']
+
+  # Scrolling layout: `scroll --direction left|right` focuses the adjacent
+  # column without leaving the workspace or moving the cursor. Intended to
+  # be run from a bar (e.g. on mouse wheel via the GlazeWM CLI).
 
   # Change focus from tiling windows -> floating -> fullscreen.
   - commands: ['wm-cycle-focus']

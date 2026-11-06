@@ -14,6 +14,21 @@ pub fn toggle_tiling_direction(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  // Scrolling workspaces always arrange their columns horizontally. Use
+  // the column commands (e.g. `consume-into-column`) to stack windows.
+  let is_scrolling_level = match &container {
+    Container::Workspace(workspace) => workspace.is_scrolling(),
+    Container::TilingWindow(window) => window.scrolling_parent().is_some(),
+    _ => false,
+  };
+
+  if is_scrolling_level {
+    tracing::warn!(
+      "Cannot change tiling direction of a scrolling workspace's columns."
+    );
+    return Ok(());
+  }
+
   let direction_container = match container {
     Container::TilingWindow(tiling_window) => {
       toggle_window_direction(tiling_window, config)

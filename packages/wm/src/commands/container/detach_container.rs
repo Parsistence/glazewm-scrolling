@@ -25,6 +25,10 @@ pub fn detach_container(child_to_remove: Container) -> anyhow::Result<()> {
 
   let parent = child_to_remove.parent().context("No parent.")?;
 
+  // Columns of scrolling workspaces have independent sizes, so siblings
+  // don't need to fill the freed up space.
+  let is_scrolling_column = child_to_remove.scrolling_parent().is_some();
+
   parent
     .borrow_children_mut()
     .retain(|c| c.id() != child_to_remove.id());
@@ -36,7 +40,11 @@ pub fn detach_container(child_to_remove: Container) -> anyhow::Result<()> {
   *child_to_remove.borrow_parent_mut() = None;
 
   // Resize the siblings if it is a tiling container.
-  if let Ok(child_to_remove) = child_to_remove.as_tiling_container() {
+  if let Some(child_to_remove) = child_to_remove
+    .as_tiling_container()
+    .ok()
+    .filter(|_| !is_scrolling_column)
+  {
     let tiling_siblings = parent.tiling_children().collect::<Vec<_>>();
 
     // TODO: Share logic with `resize_tiling_container`.
