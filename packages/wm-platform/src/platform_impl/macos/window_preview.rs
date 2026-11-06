@@ -17,7 +17,8 @@ impl WindowPreview {
   }
 
   /// Implements [`WindowPreview::show`].
-  #[allow(clippy::unused_self)]
+  // LINT: Signature matches the Windows implementation.
+  #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
   pub(crate) fn show(
     &self,
     _source_rect: &Rect,
@@ -28,7 +29,8 @@ impl WindowPreview {
   }
 
   /// Implements [`WindowPreview::hide`].
-  #[allow(clippy::unused_self)]
+  // LINT: Signature matches the Windows implementation.
+  #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
   pub(crate) fn hide(&self) -> crate::Result<()> {
     Ok(())
   }
