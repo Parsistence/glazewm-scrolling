@@ -7,8 +7,9 @@ use std::{
 use anyhow::Context;
 use uuid::Uuid;
 use wm_common::{
-  ColumnDto, ContainerDto, GapsConfig, ScrollingConfig, ScrollingStateDto,
-  TilingDirection, WorkspaceConfig, WorkspaceDto, WorkspaceLayout,
+  ColumnDto, ContainerDto, GapsConfig, PeekMode, ScrollingConfig,
+  ScrollingStateDto, TilingDirection, WorkspaceConfig, WorkspaceDto,
+  WorkspaceLayout,
 };
 use wm_platform::{LengthUnit, LengthValue, Rect, RectDelta};
 
@@ -135,6 +136,11 @@ impl Workspace {
 
   pub fn set_scroll_offset(&self, scroll_offset: i32) {
     self.0.borrow_mut().scroll_offset = scroll_offset;
+  }
+
+  /// How columns that are partially outside the viewport are shown.
+  pub fn peek_mode(&self) -> PeekMode {
+    self.0.borrow().scrolling_config.peek_mode
   }
 
   /// Size (fraction of the viewport) for newly created columns.

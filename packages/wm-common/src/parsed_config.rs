@@ -135,6 +135,30 @@ pub struct ScrollingConfig {
 
   /// Widths cycled through by the `cycle-column-width` command.
   pub column_width_presets: Vec<LengthValue>,
+
+  /// How columns that are partially outside the viewport are shown.
+  pub peek_mode: PeekMode,
+}
+
+/// How columns that are partially outside a scrolling workspace's
+/// viewport ("peeking" columns) are shown.
+#[derive(
+  Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PeekMode {
+  /// Peeking windows extend past monitor edges that have no adjacent
+  /// monitor. At edges shared with another monitor, a live preview of the
+  /// peeking part is shown instead, so windows don't spill onto the other
+  /// monitor.
+  #[default]
+  Auto,
+
+  /// A live preview of the peeking part is shown at every monitor edge.
+  Preview,
+
+  /// Peeking columns are hidden.
+  Hide,
 }
 
 impl Default for ScrollingConfig {
@@ -152,6 +176,7 @@ impl Default for ScrollingConfig {
         percentage(0.67),
         percentage(1.0),
       ],
+      peek_mode: PeekMode::default(),
     }
   }
 }

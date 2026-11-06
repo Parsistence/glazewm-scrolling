@@ -7,6 +7,7 @@ mod mouse_listener;
 mod native_window;
 mod single_instance;
 mod window_listener;
+mod window_preview;
 
 pub(crate) use display::*;
 pub(crate) use display_listener::*;
@@ -16,3 +17,4 @@ pub(crate) use mouse_listener::*;
 pub(crate) use native_window::*;
 pub(crate) use single_instance::*;
 pub(crate) use window_listener::*;
+pub(crate) use window_preview::*;

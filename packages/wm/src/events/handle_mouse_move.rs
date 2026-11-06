@@ -55,6 +55,27 @@ pub fn handle_mouse_move(
     return Ok(());
   }
 
+  // Clicking a preview of a peeking window focuses the window, which
+  // scrolls its column into view.
+  if let MouseEvent::ButtonUp {
+    position,
+    button: MouseButton::Left,
+    ..
+  } = event
+  {
+    let previewed_window = state
+      .window_previews
+      .window_at_point(position)
+      .and_then(|window_id| state.container_by_id(window_id));
+
+    if let Some(window) = previewed_window {
+      set_focused_descendant(&window, None);
+      state.pending_sync.queue_focus_change();
+    }
+
+    return Ok(());
+  }
+
   if let MouseEvent::Move {
     pressed_buttons,
     // LINT: `window_below_cursor` is only used on macOS.

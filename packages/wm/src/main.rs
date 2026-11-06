@@ -45,6 +45,7 @@ mod scrolling;
 mod sys_tray;
 mod traits;
 mod user_config;
+mod window_previews;
 mod wm;
 mod wm_state;
 

@@ -13,9 +13,10 @@ use wm_platform::{Rect, WindowZOrder};
 
 use crate::{
   models::{Container, WindowContainer, Workspace},
-  scrolling::ColumnVisibility,
+  scrolling::{self, ColumnVisibility, PeekDecision},
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
+  window_previews::DesiredPreview,
   wm_state::WmState,
 };
 
@@ -76,6 +77,7 @@ pub fn platform_sync(
     }
   }
 
+  sync_window_previews(state)?;
   broadcast_scroll_state_changes(state)?;
 
   state.pending_sync.clear();
@@ -125,32 +127,99 @@ fn update_scroll_offsets(state: &mut WmState) -> anyhow::Result<()> {
   Ok(())
 }
 
-/// Whether a window is a tiling window in a scrolling workspace whose
-/// column lies entirely outside the viewport.
+/// Decides how a window is shown based on its column's position relative
+/// to its scrolling workspace's viewport.
+///
+/// Windows that aren't tiling windows of a scrolling workspace are always
+/// `PeekDecision::Shown`.
 ///
 /// # Platform-specific
 ///
-/// - **macOS**: Always `false`; scrolled-out columns are left positioned
-///   outside the viewport, since windows can't be cloaked.
-fn is_scrolled_out(
+/// - **macOS**: Always `PeekDecision::Shown`; columns outside the viewport
+///   are left positioned outside of it, since windows can't be cloaked.
+fn window_peek(
   window: &WindowContainer,
   workspace: &Workspace,
-) -> anyhow::Result<bool> {
+  state: &WmState,
+) -> anyhow::Result<PeekDecision> {
   if cfg!(target_os = "macos")
     || !workspace.is_scrolling()
     || !window.is_tiling_window()
   {
-    return Ok(false);
+    return Ok(PeekDecision::Shown);
   }
 
   let Some(column) = workspace.column_of(&window.clone().into()) else {
-    return Ok(false);
+    return Ok(PeekDecision::Shown);
   };
 
+  match workspace.column_visibility(&column)? {
+    Some(ColumnVisibility::Full) | None => Ok(PeekDecision::Shown),
+    Some(ColumnVisibility::Hidden) => Ok(PeekDecision::Hidden),
+    Some(ColumnVisibility::Partial) => {
+      let monitor = workspace.monitor().context("No monitor.")?;
+      let other_monitor_rects = state
+        .monitors()
+        .into_iter()
+        .filter(|other| other.id() != monitor.id())
+        .map(|other| other.to_rect())
+        .try_collect::<Vec<_>>()?;
+
+      Ok(scrolling::peek_decision(
+        &window_frame_rect(window)?,
+        &monitor.to_rect()?,
+        &other_monitor_rects,
+        workspace.peek_mode(),
+      ))
+    }
+  }
+}
+
+/// Gets the rect to position a window's outer frame at, including its
+/// border delta.
+fn window_frame_rect(window: &WindowContainer) -> anyhow::Result<Rect> {
   Ok(
-    workspace.column_visibility(&column)?
-      == Some(ColumnVisibility::Hidden),
+    window
+      .to_rect()?
+      .apply_delta(&window.total_border_delta()?, None),
   )
+}
+
+/// Shows live previews in place of the real windows of peeking columns
+/// that would otherwise extend onto a neighboring monitor, and removes
+/// previews that are no longer needed.
+fn sync_window_previews(state: &mut WmState) -> anyhow::Result<()> {
+  let mut desired = Vec::new();
+
+  let displayed_scrolling_workspaces =
+    state.workspaces().into_iter().filter(|workspace| {
+      workspace.is_scrolling() && workspace.is_displayed()
+    });
+
+  for workspace in displayed_scrolling_workspaces {
+    let tiling_windows = workspace
+      .descendants()
+      .filter_map(|descendant| descendant.as_window_container().ok())
+      .filter(WindowContainer::is_tiling_window);
+
+    for window in tiling_windows {
+      if let PeekDecision::Preview(visible_rect) =
+        window_peek(&window, &workspace, state)?
+      {
+        desired.push(DesiredPreview {
+          window_id: window.id(),
+          native_window: window.native().clone(),
+          source_rect: window_frame_rect(&window)?,
+          visible_rect,
+        });
+      }
+    }
+  }
+
+  let dispatcher = state.dispatcher.clone();
+  state.window_previews.sync(desired, &dispatcher);
+
+  Ok(())
 }
 
 fn sync_focus(
@@ -341,10 +410,11 @@ fn redraw_containers(
       continue;
     }
 
-    // Windows in scrolled-out columns are hidden even though their
-    // workspace is displayed.
-    let is_scrolled_out =
-      workspace.is_displayed() && is_scrolled_out(window, &workspace)?;
+    // Windows in columns outside the viewport are hidden even though their
+    // workspace is displayed. Peeking windows that are replaced by a
+    // preview are hidden too (see `sync_window_previews`).
+    let is_scrolled_out = workspace.is_displayed()
+      && window_peek(window, &workspace, state)? != PeekDecision::Shown;
 
     // Transition display state depending on whether window will be
     // shown or hidden.

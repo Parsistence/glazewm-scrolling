@@ -12,6 +12,7 @@ mod native_window;
 mod notification_center;
 mod single_instance;
 mod window_listener;
+mod window_preview;
 
 pub(crate) use application::*;
 pub(crate) use application_observer::*;
@@ -26,3 +27,4 @@ pub(crate) use native_window::*;
 pub(crate) use notification_center::*;
 pub(crate) use single_instance::*;
 pub(crate) use window_listener::*;
+pub(crate) use window_preview::*;

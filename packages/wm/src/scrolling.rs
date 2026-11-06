@@ -6,6 +6,9 @@
 //! position. Column widths are fractions of the viewport (plus one inner
 //! gap), so columns whose widths sum to `1.0` exactly fill the viewport.
 
+use wm_common::PeekMode;
+use wm_platform::Rect;
+
 /// Minimum width of a column as a fraction of the viewport.
 pub const MIN_COLUMN_SIZE: f32 = 0.05;
 
@@ -183,6 +186,111 @@ pub fn parked_x(
   }
 }
 
+/// How a window in a column that's partially outside the viewport (a
+/// "peeking" column) is shown.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PeekDecision {
+  /// The real window is shown at its position in the strip. Any part
+  /// beyond the monitor's edge is simply off-screen.
+  Shown,
+
+  /// The real window is hidden, and a live preview covers the given
+  /// visible area instead. Used where the window would otherwise extend
+  /// onto a neighboring monitor.
+  Preview(Rect),
+
+  /// The window is hidden.
+  Hidden,
+}
+
+/// Decides how to show a window of a peeking column.
+///
+/// `window_rect` is where the window would be placed in the strip, and
+/// `monitor_rect` the bounds of the window's monitor.
+#[must_use]
+pub fn peek_decision(
+  window_rect: &Rect,
+  monitor_rect: &Rect,
+  other_monitor_rects: &[Rect],
+  mode: PeekMode,
+) -> PeekDecision {
+  if mode == PeekMode::Hide {
+    return PeekDecision::Hidden;
+  }
+
+  let Some(visible_rect) = intersection(window_rect, monitor_rect) else {
+    return PeekDecision::Hidden;
+  };
+
+  let crosses_left = window_rect.left < monitor_rect.left;
+  let crosses_right = window_rect.right > monitor_rect.right;
+
+  let needs_preview = match mode {
+    PeekMode::Preview => crosses_left || crosses_right,
+    PeekMode::Auto => {
+      (crosses_left
+        && has_adjacent_monitor(
+          monitor_rect,
+          other_monitor_rects,
+          HorizontalEdge::Left,
+        ))
+        || (crosses_right
+          && has_adjacent_monitor(
+            monitor_rect,
+            other_monitor_rects,
+            HorizontalEdge::Right,
+          ))
+    }
+    PeekMode::Hide => unreachable!("Handled above."),
+  };
+
+  if needs_preview {
+    PeekDecision::Preview(visible_rect)
+  } else {
+    PeekDecision::Shown
+  }
+}
+
+/// Left or right edge of a rect.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HorizontalEdge {
+  Left,
+  Right,
+}
+
+/// Whether another monitor shares the given edge of `monitor_rect`, i.e.
+/// is directly beside it and overlaps it vertically.
+#[must_use]
+pub fn has_adjacent_monitor(
+  monitor_rect: &Rect,
+  other_monitor_rects: &[Rect],
+  edge: HorizontalEdge,
+) -> bool {
+  other_monitor_rects.iter().any(|other| {
+    let is_beside = match edge {
+      HorizontalEdge::Left => other.right == monitor_rect.left,
+      HorizontalEdge::Right => other.left == monitor_rect.right,
+    };
+
+    is_beside
+      && other.top < monitor_rect.bottom
+      && other.bottom > monitor_rect.top
+  })
+}
+
+/// Gets the overlapping area of two rects, or `None` if they don't
+/// overlap.
+#[must_use]
+pub fn intersection(a: &Rect, b: &Rect) -> Option<Rect> {
+  let left = a.left.max(b.left);
+  let top = a.top.max(b.top);
+  let right = a.right.min(b.right);
+  let bottom = a.bottom.min(b.bottom);
+
+  (left < right && top < bottom)
+    .then(|| Rect::from_ltrb(left, top, right, bottom))
+}
+
 /// Gets the next size in `presets` after `current`, wrapping around to
 /// the smallest preset.
 ///
@@ -318,6 +426,91 @@ mod tests {
     assert_eq!(parked_x(-900, 500, 100, 1000), 100);
     assert_eq!(parked_x(1500, 500, 100, 1000), 600);
     assert_eq!(parked_x(1500, 1200, 100, 1000), 100);
+  }
+
+  /// Two side-by-side 1000x800 monitors.
+  fn monitors() -> (Rect, Rect) {
+    (
+      Rect::from_xy(0, 0, 1000, 800),
+      Rect::from_xy(1000, 0, 1000, 800),
+    )
+  }
+
+  #[test]
+  fn adjacent_monitors_are_detected_per_edge() {
+    let (left, right) = monitors();
+
+    assert!(has_adjacent_monitor(
+      &left,
+      std::slice::from_ref(&right),
+      HorizontalEdge::Right
+    ));
+    assert!(!has_adjacent_monitor(
+      &left,
+      std::slice::from_ref(&right),
+      HorizontalEdge::Left
+    ));
+
+    // Vertically offset without overlap isn't adjacent.
+    let below = Rect::from_xy(1000, 800, 1000, 800);
+    assert!(!has_adjacent_monitor(
+      &left,
+      &[below],
+      HorizontalEdge::Right
+    ));
+  }
+
+  #[test]
+  fn auto_mode_previews_only_at_shared_edges() {
+    let (left, right) = monitors();
+    let others = [right];
+
+    // Crosses the shared right edge: preview the visible part.
+    let crossing_right = Rect::from_xy(700, 0, 500, 800);
+    assert_eq!(
+      peek_decision(&crossing_right, &left, &others, PeekMode::Auto),
+      PeekDecision::Preview(Rect::from_ltrb(700, 0, 1000, 800))
+    );
+
+    // Crosses the outer left edge: the real window can overflow.
+    let crossing_left = Rect::from_xy(-200, 0, 500, 800);
+    assert_eq!(
+      peek_decision(&crossing_left, &left, &others, PeekMode::Auto),
+      PeekDecision::Shown
+    );
+  }
+
+  #[test]
+  fn preview_mode_previews_at_every_edge() {
+    let (left, _) = monitors();
+    let crossing_left = Rect::from_xy(-200, 0, 500, 800);
+
+    assert_eq!(
+      peek_decision(&crossing_left, &left, &[], PeekMode::Preview),
+      PeekDecision::Preview(Rect::from_ltrb(0, 0, 300, 800))
+    );
+  }
+
+  #[test]
+  fn windows_within_the_monitor_are_shown_and_hide_mode_hides() {
+    let (left, right) = monitors();
+    let others = [right];
+    let in_outer_gap = Rect::from_xy(10, 0, 500, 800);
+
+    assert_eq!(
+      peek_decision(&in_outer_gap, &left, &others, PeekMode::Preview),
+      PeekDecision::Shown
+    );
+    assert_eq!(
+      peek_decision(&in_outer_gap, &left, &others, PeekMode::Hide),
+      PeekDecision::Hidden
+    );
+
+    let off_monitor = Rect::from_xy(1200, 0, 500, 800);
+    assert_eq!(
+      peek_decision(&off_monitor, &left, &others, PeekMode::Auto),
+      PeekDecision::Hidden
+    );
   }
 
   #[test]

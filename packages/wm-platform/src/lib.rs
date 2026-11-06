@@ -16,6 +16,7 @@ mod platform_impl;
 mod single_instance;
 mod thread_bound;
 mod window_listener;
+mod window_preview;
 
 #[cfg(feature = "test_utils")]
 pub mod test_utils;
@@ -33,6 +34,7 @@ pub use platform_event::*;
 pub use single_instance::*;
 pub use thread_bound::*;
 pub use window_listener::*;
+pub use window_preview::*;
 // TODO: Avoid exposing `windows` crate types in the public API.
 #[cfg(target_os = "windows")]
 pub use windows::Win32::UI::WindowsAndMessaging::{

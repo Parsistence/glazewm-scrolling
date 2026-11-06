@@ -25,6 +25,7 @@ use crate::{
   pending_sync::PendingSync,
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
+  window_previews::WindowPreviews,
 };
 
 pub struct WmState {
@@ -67,6 +68,10 @@ pub struct WmState {
   /// Whether the OS focused window is the same as the WM focused window.
   pub is_focus_synced: bool,
 
+  /// Live previews shown in place of peeking windows of scrolling
+  /// workspaces.
+  pub window_previews: WindowPreviews,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -94,6 +99,7 @@ impl WmState {
       ignored_windows: Vec::new(),
       is_paused: false,
       is_focus_synced: false,
+      window_previews: WindowPreviews::default(),
       has_initialized: false,
       event_tx,
       exit_tx,

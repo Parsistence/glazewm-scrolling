@@ -50,6 +50,14 @@ general:
     # Widths cycled through by the `cycle-column-width` command.
     column_width_presets: ['33%', '50%', '67%', '100%']
 
+    # How columns that are partially outside the screen ("peeking") are shown:
+    # - 'auto': Real windows extend past screen edges. At edges shared with
+    #   another monitor, a live preview is shown instead, so that windows
+    #   don't spill onto the other monitor. (Windows-only previews.)
+    # - 'preview': Live previews at every screen edge.
+    # - 'hide': Peeking columns are hidden.
+    peek_mode: 'auto'
+
 gaps:
   # Whether to scale the gaps with the DPI of the monitor.
   scale_with_dpi: true
