@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use wm_common::{
   InvokeCommand, KeybindingConfig, MatchType, ParsedConfig,
   WindowMatchConfig, WindowRuleConfig, WindowRuleEvent, WorkspaceConfig,
+  APP_DATA_DIR, CONFIG_PATH_ENV_VAR,
 };
 
 use crate::{
@@ -39,10 +40,11 @@ impl UserConfig {
   pub fn new(config_path: Option<PathBuf>) -> anyhow::Result<Self> {
     let default_config_path = home::home_dir()
       .context("Unable to get home directory.")?
-      .join(".glzr/glazewm/config.yaml");
+      .join(APP_DATA_DIR)
+      .join("config.yaml");
 
     let config_path = config_path
-      .or_else(|| env::var("GLAZEWM_CONFIG_PATH").ok().map(PathBuf::from))
+      .or_else(|| env::var(CONFIG_PATH_ENV_VAR).ok().map(PathBuf::from))
       .unwrap_or(default_config_path);
 
     let (config_value, config_str) = Self::read(&config_path)?;
@@ -83,7 +85,7 @@ impl UserConfig {
       config_path.parent().context("Invalid config path.")?;
 
     fs::create_dir_all(parent_dir).with_context(|| {
-      format!("Unable to create directory {}.", &config_path.display())
+      format!("Unable to create directory {}.", config_path.display())
     })?;
 
     fs::write(config_path, SAMPLE_CONFIG).with_context(|| {

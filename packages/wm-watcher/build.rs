@@ -14,8 +14,8 @@ fn main() {
   res.set_language(0x0409);
 
   res.set("OriginalFilename", "glazewm-watcher.exe");
-  res.set("ProductName", "GlazeWM Watcher");
-  res.set("FileDescription", "GlazeWM Watcher");
+  res.set("ProductName", "GlazeWM Scrolling Watcher");
+  res.set("FileDescription", "GlazeWM Scrolling Watcher");
 
   let version_parts = env!("VERSION_NUMBER")
     .split('.')

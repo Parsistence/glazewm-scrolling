@@ -143,7 +143,7 @@ jobs:
 
       - name: Create app bundle
         run: |
-          CONTENTS_DIR="temp/GlazeWM.app/Contents"
+          CONTENTS_DIR="temp/GlazeWMScrolling.app/Contents"
           mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 
           cp temp/glazewm "$CONTENTS_DIR/MacOS/"
@@ -162,20 +162,20 @@ jobs:
         run: |
           codesign --force --options runtime --timestamp \
             --sign "$APPLE_SIGNING_IDENTITY" \
-            temp/GlazeWM.app
-          codesign --verify --verbose=2 --deep --strict temp/GlazeWM.app
+            temp/GlazeWMScrolling.app
+          codesign --verify --verbose=2 --deep --strict temp/GlazeWMScrolling.app
 
       - name: Create DMG
         run: |
           DMG_DIR="temp/dmg-contents"
           mkdir -p $DMG_DIR
-          cp -R temp/GlazeWM.app $DMG_DIR/
+          cp -R temp/GlazeWMScrolling.app $DMG_DIR/
 
           # Create a symbolic link to `/Applications` folder.
           ln -s /Applications $DMG_DIR/Applications
 
           # Create the DMG.
-          hdiutil create -volname GlazeWM \
+          hdiutil create -volname "GlazeWM Scrolling" \
             -srcfolder $DMG_DIR \
             -ov -format UDZO \
             installer-universal.dmg

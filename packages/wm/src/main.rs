@@ -20,7 +20,9 @@ use tracing_subscriber::{
   fmt::{self, writer::MakeWriterExt},
   layer::SubscriberExt,
 };
-use wm_common::{AppCommand, InvokeCommand, Verbosity, WmEvent};
+use wm_common::{
+  AppCommand, InvokeCommand, Verbosity, WmEvent, APP_DATA_DIR,
+};
 #[cfg(target_os = "macos")]
 use wm_platform::DispatcherExtMacOs;
 use wm_platform::{
@@ -300,11 +302,11 @@ async fn start_wm(
 
 /// Initialize logging with the specified verbosity level.
 ///
-/// Error logs are saved to `~/.glzr/glazewm/errors.log`.
+/// Error logs are saved to `~/.glzr/glazewm-scrolling/errors.log`.
 fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
   let error_log_dir = home::home_dir()
     .context("Unable to get home directory.")?
-    .join(".glzr/glazewm/");
+    .join(APP_DATA_DIR);
 
   let error_writer =
     tracing_appender::rolling::never(error_log_dir, "errors.log");

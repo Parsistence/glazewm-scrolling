@@ -1,8 +1,8 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
-    Name="GlazeWM"
+    Name="GlazeWM Scrolling"
     Version="$(var.VERSION_NUMBER)"
-    UpgradeCode="ef0f849b-d90d-4647-bb26-730c6fce5f9e"
+    UpgradeCode="c78f7ec2-33ac-45cd-9b95-b77324a89ec5"
     Manufacturer="Glzr Software Pte. Ltd."
     Language="1033"
     Scope="perMachine"
@@ -41,11 +41,11 @@
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="Custom_OrgDir" Name="glzr.io">
-        <Directory Id="INSTALLFOLDER" Name="GlazeWM">
+        <Directory Id="INSTALLFOLDER" Name="GlazeWM Scrolling">
           <Component Id="Custom_CreateInstallDir">
             <RegistryValue
               Root="HKLM"
-              Key="SOFTWARE\glzr.io\GlazeWM"
+              Key="SOFTWARE\glzr.io\GlazeWM Scrolling"
               Name="InstallDir"
               Value="[INSTALLFOLDER]"
               Type="string"
@@ -54,15 +54,15 @@
           </Component>
 
           <!-- Add main + watcher executable. -->
-          <Component Id="Custom_InstallRootFiles" Guid="73752F94-6589-4C7B-ABED-39D655A19714">
+          <Component Id="Custom_InstallRootFiles" Guid="af270dc0-e2d1-4cca-9e34-bb0d28df0c3c">
             <File Id="Custom_RootExe" Source="$(var.EXE_DIR)/glazewm.exe" KeyPath="yes" />
             <File Id="Custom_RootWatcherExe" Source="$(var.EXE_DIR)/glazewm-watcher.exe" />
           </Component>
 
           <!-- Add CLI executable. -->
           <Directory Id="Custom_CliDir" Name="cli">
-            <Component Id="Custom_InstallCliFiles" Guid="916284d8-100c-4f37-8d8c-2722b01cb3dd">
-              <File Id="Custom_CliExe" Source="$(var.EXE_DIR)/glazewm-cli.exe" Name="glazewm.exe" KeyPath="yes" />
+            <Component Id="Custom_InstallCliFiles" Guid="ec6309b1-e78b-444f-b7e8-7ea3a2c9fab6">
+              <File Id="Custom_CliExe" Source="$(var.EXE_DIR)/glazewm-cli.exe" Name="glazewm-scrolling.exe" KeyPath="yes" />
             </Component>
           </Directory>
         </Directory>
@@ -74,14 +74,14 @@
       <Component Id="Custom_AddDesktopShortcut" Condition="ENABLE_DESKTOP_SHORTCUT = 1">
         <Shortcut
           Id="Custom_DesktopShortcut"
-          Name="GlazeWM"
-          Description="Launch GlazeWM"
+          Name="GlazeWM Scrolling"
+          Description="Launch GlazeWM Scrolling"
           Target="[INSTALLFOLDER]glazewm.exe"
         />
 
         <RegistryValue
           Root="HKLM"
-          Key="SOFTWARE\glzr.io\GlazeWM"
+          Key="SOFTWARE\glzr.io\GlazeWM Scrolling"
           Name="DesktopShortcutInstalled"
           Type="integer"
           Value="1"
@@ -95,14 +95,14 @@
       <Component Id="Custom_AddStartMenuShortcut" Condition="ENABLE_START_MENU_SHORTCUT = 1">
         <Shortcut
           Id="Custom_StartMenuShortcut"
-          Name="GlazeWM"
-          Description="Launch GlazeWM"
+          Name="GlazeWM Scrolling"
+          Description="Launch GlazeWM Scrolling"
           Target="[INSTALLFOLDER]glazewm.exe"
         />
 
         <RegistryValue
           Root="HKLM"
-          Key="SOFTWARE\glzr.io\GlazeWM"
+          Key="SOFTWARE\glzr.io\GlazeWM Scrolling"
           Name="StartMenuShortcutInstalled"
           Type="integer"
           Value="1"
@@ -112,7 +112,7 @@
     </StandardDirectory>
 
     <!-- Add CLI directory to PATH. -->
-    <Component Id="Custom_AddPathEnv" Guid="66a4be46-19ae-4ed4-944f-b01673887f64" KeyPath="yes">
+    <Component Id="Custom_AddPathEnv" Guid="1b147578-4ab2-4063-9157-ff3cb479a700" KeyPath="yes">
       <Environment
         Id="Custom_PathEnv"
         Value="[INSTALLFOLDER]\cli"
@@ -125,11 +125,11 @@
     </Component>
 
     <!-- Remove auto-launch registry values on uninstall. -->
-    <Component Id="Custom_RemoveAutoLaunchRegistry" Guid="B1A2C3D4-E5F6-47A8-9B0C-1234567890AB">
+    <Component Id="Custom_RemoveAutoLaunchRegistry" Guid="3140a88c-4145-49c6-add6-4fc241b146fb">
       <!-- `RegistryValue` with `KeyPath="yes"` is needed for component state tracking. -->
       <RegistryValue
         Root="HKLM"
-        Key="SOFTWARE\glzr.io\GlazeWM"
+        Key="SOFTWARE\glzr.io\GlazeWM Scrolling"
         Name="AutoLaunchCleanup"
         Type="integer"
         Value="1"
@@ -138,11 +138,11 @@
       <RemoveRegistryValue
         Root="HKCU"
         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-        Name="GlazeWM" />
+        Name="GlazeWM Scrolling" />
       <RemoveRegistryValue
         Root="HKCU"
         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-        Name="GlazeWM" />
+        Name="GlazeWM Scrolling" />
     </Component>
   </Package>
 </Wix>

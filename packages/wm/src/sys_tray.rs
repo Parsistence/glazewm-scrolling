@@ -12,6 +12,7 @@ use tray_icon::{
   menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
   Icon, TrayIcon, TrayIconBuilder,
 };
+use wm_common::APP_NAME;
 #[cfg(target_os = "windows")]
 use wm_platform::DispatcherExtWindows;
 use wm_platform::{Dispatcher, ThreadBound};
@@ -188,7 +189,7 @@ impl SystemTray {
 
     let tray_icon = TrayIconBuilder::new()
       .with_menu(Box::new(tray_menu))
-      .with_tooltip(format!("GlazeWM v{}", env!("VERSION_NUMBER")))
+      .with_tooltip(format!("{APP_NAME} v{}", env!("VERSION_NUMBER")))
       .with_icon(icon)
       .build()?;
 
@@ -282,10 +283,10 @@ fn auto_launch_instance() -> anyhow::Result<AutoLaunch> {
   let args: [&str; 0] = [];
 
   #[cfg(target_os = "windows")]
-  let instance = AutoLaunch::new("GlazeWM", &exe_path, &args);
+  let instance = AutoLaunch::new(APP_NAME, &exe_path, &args);
 
   #[cfg(target_os = "macos")]
-  let instance = AutoLaunch::new("GlazeWM", &exe_path, false, &args);
+  let instance = AutoLaunch::new(APP_NAME, &exe_path, false, &args);
 
   Ok(instance)
 }

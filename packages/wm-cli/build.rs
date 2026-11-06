@@ -9,9 +9,9 @@ fn main() {
   // Set language to English (US).
   res.set_language(0x0409);
 
-  res.set("OriginalFilename", "glazewm.exe");
-  res.set("ProductName", "GlazeWM CLI");
-  res.set("FileDescription", "GlazeWM CLI");
+  res.set("OriginalFilename", "glazewm-scrolling.exe");
+  res.set("ProductName", "GlazeWM Scrolling CLI");
+  res.set("FileDescription", "GlazeWM Scrolling CLI");
 
   let version_parts = env!("VERSION_NUMBER")
     .split('.')

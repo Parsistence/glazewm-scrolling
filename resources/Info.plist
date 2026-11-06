@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>GlazeWM</string>
+    <string>GlazeWM Scrolling</string>
 
     <key>CFBundleDisplayName</key>
-    <string>GlazeWM</string>
+    <string>GlazeWM Scrolling</string>
 
     <key>CFBundleIdentifier</key>
-    <string>io.glzr.glazewm</string>
+    <string>io.glzr.glazewm-scrolling</string>
 
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>

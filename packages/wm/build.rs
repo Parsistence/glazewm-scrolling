@@ -59,8 +59,8 @@ fn main() {
   res.set_language(0x0409);
 
   res.set("OriginalFilename", "glazewm.exe");
-  res.set("ProductName", "GlazeWM");
-  res.set("FileDescription", "GlazeWM");
+  res.set("ProductName", "GlazeWM Scrolling");
+  res.set("FileDescription", "GlazeWM Scrolling");
 
   let version_parts = env!("VERSION_NUMBER")
     .split('.')
