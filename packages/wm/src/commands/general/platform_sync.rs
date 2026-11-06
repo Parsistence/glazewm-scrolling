@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
 #[cfg(target_os = "windows")]
@@ -134,7 +134,6 @@ fn update_scroll_offsets(
   let animation_config = &config.value.general.scrolling.animation;
 
   for workspace in scrolling_workspaces {
-    let start_rects = tiling_window_rects(&workspace)?;
     let did_scroll = workspace.update_scroll_offset()?;
 
     if did_scroll {
@@ -157,10 +156,12 @@ fn update_scroll_offsets(
     let targets = tiling_window_rects(&workspace)?
       .into_iter()
       .map(|(window, to)| {
-        let from = start_rects
-          .iter()
-          .find(|(start_window, _)| start_window.id() == window.id())
-          .map_or_else(|| to.clone(), |(_, rect)| rect.clone());
+        // New windows appear in place.
+        let from = state
+          .scroll_animations
+          .last_strip_rect(window.id())
+          .cloned()
+          .unwrap_or_else(|| to.clone());
 
         SlideTarget {
           window: window.native().clone(),
@@ -190,16 +191,24 @@ fn update_scroll_offsets(
     }
   }
 
-  let displayed_workspace_ids = state
+  let displayed_workspaces = state
     .workspaces()
     .into_iter()
     .filter(Workspace::is_displayed)
-    .map(|workspace| workspace.id())
-    .collect();
+    .collect::<Vec<_>>();
 
-  state
-    .scroll_animations
-    .set_displayed(displayed_workspace_ids);
+  let mut strip_rects = HashMap::new();
+  for workspace in displayed_workspaces.iter().filter(|w| w.is_scrolling())
+  {
+    for (window, rect) in tiling_window_rects(workspace)? {
+      strip_rects.insert(window.id(), rect);
+    }
+  }
+
+  state.scroll_animations.record_sync(
+    displayed_workspaces.iter().map(CommonGetters::id).collect(),
+    strip_rects,
+  );
 
   Ok(())
 }

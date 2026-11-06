@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use wm_platform::{SlideAnimator, SlideEnded, SlideRequest};
+use wm_platform::{Rect, SlideAnimator, SlideEnded, SlideRequest};
 
 /// Scroll animations of all workspaces.
 #[derive(Default)]
@@ -25,6 +25,11 @@ pub struct ScrollAnimations {
   /// that stay displayed are animated (not e.g. when switching
   /// workspaces).
   displayed: HashSet<Uuid>,
+
+  /// Rects of the tiling windows of displayed scrolling workspaces as of
+  /// the last sync, by window ID. Animations start from these, so that
+  /// columns shifted by an inserted or removed column slide too.
+  strip_rects: HashMap<Uuid, Rect>,
 }
 
 impl ScrollAnimations {
@@ -60,9 +65,21 @@ impl ScrollAnimations {
     self.displayed.contains(&workspace_id)
   }
 
-  /// Records which workspaces are displayed as of this sync.
-  pub fn set_displayed(&mut self, workspace_ids: HashSet<Uuid>) {
-    self.displayed = workspace_ids;
+  /// Gets the rect a tiling window was placed at as of the last sync, if
+  /// its workspace was a displayed scrolling workspace.
+  pub fn last_strip_rect(&self, window_id: Uuid) -> Option<&Rect> {
+    self.strip_rects.get(&window_id)
+  }
+
+  /// Records the displayed workspaces and the rects of their tiling
+  /// windows (for scrolling workspaces) as of this sync.
+  pub fn record_sync(
+    &mut self,
+    displayed_workspace_ids: HashSet<Uuid>,
+    strip_rects: HashMap<Uuid, Rect>,
+  ) {
+    self.displayed = displayed_workspace_ids;
+    self.strip_rects = strip_rects;
   }
 
   /// Starts or retargets the animation of a workspace's strip.
