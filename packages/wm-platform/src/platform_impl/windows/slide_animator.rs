@@ -1,5 +1,6 @@
 use std::{
   collections::{HashMap, HashSet},
+  ffi::c_void,
   sync::{mpsc as std_mpsc, OnceLock},
   thread::{self, JoinHandle},
   time::{Duration, Instant},
@@ -11,8 +12,9 @@ use windows::{
   Win32::{
     Foundation::{BOOL, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM},
     Graphics::Dwm::{
-      DwmFlush, DwmGetCompositionTimingInfo, DwmRegisterThumbnail,
-      DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
+      DwmFlush, DwmGetCompositionTimingInfo, DwmGetWindowAttribute,
+      DwmRegisterThumbnail, DwmUnregisterThumbnail,
+      DwmUpdateThumbnailProperties, DWMWA_EXTENDED_FRAME_BOUNDS,
       DWM_THUMBNAIL_PROPERTIES, DWM_TIMING_INFO, DWM_TNP_OPACITY,
       DWM_TNP_RECTDESTINATION, DWM_TNP_RECTSOURCE,
       DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
@@ -32,6 +34,7 @@ use windows::{
   },
 };
 
+use super::window_shadow::{ShadowMargins, ShadowSource};
 use crate::{
   slide_animator::{Slide, SlideWindow},
   NativeWindow, NativeWindowWindowsExt, Rect, SlideEnded, SlideKey,
@@ -49,6 +52,13 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Refresh period used if it can't be queried from DWM (60 Hz).
 const FALLBACK_REFRESH_PERIOD: Duration = Duration::from_micros(16_667);
+
+/// Number of cached shadow sources above which unused ones are destroyed.
+const MAX_CACHED_SHADOWS: usize = 16;
+
+/// Identifies a shadow source by frame width, frame height and scale
+/// factor (in thousandths).
+type ShadowKey = (i32, i32, u32);
 
 /// Commands sent to the animation thread.
 enum Command {
@@ -138,6 +148,10 @@ impl Drop for SlideAnimator {
 /// State of the animation thread.
 struct AnimationThread {
   sessions: HashMap<SlideKey, Session>,
+
+  /// Shadow sources by frame size and scale, shared between sessions.
+  shadows: HashMap<ShadowKey, ShadowSource>,
+
   ended_tx: mpsc::UnboundedSender<SlideEnded>,
   next_generation: u64,
 
@@ -152,6 +166,7 @@ impl AnimationThread {
   fn new(ended_tx: mpsc::UnboundedSender<SlideEnded>) -> Self {
     Self {
       sessions: HashMap::new(),
+      shadows: HashMap::new(),
       ended_tx,
       next_generation: 1,
       last_present: Instant::now(),
@@ -193,6 +208,10 @@ impl AnimationThread {
     for session in self.sessions.into_values() {
       session.destroy();
     }
+
+    // Shadow sources are destroyed on drop, after the thumbnails of them
+    // are unregistered.
+    drop(self.shadows);
   }
 
   /// Handles a command from the WM.
@@ -276,9 +295,15 @@ impl AnimationThread {
     self.next_generation += 1;
     session.is_running = true;
     session.clip_rect = request.clip_rect.clone();
-    session.sync_thumbnails(&request.targets);
-    session.render(now);
+    session.sync_thumbnails(
+      &request.targets,
+      f64::from(request.scale_factor),
+      &mut self.shadows,
+    );
+    session.render(now, &self.shadows);
     session.show(&request.above)?;
+    let generation = session.generation;
+    self.evict_unused_shadows();
 
     // Make sure the previews are on screen before the caller hides the
     // real windows.
@@ -286,7 +311,24 @@ impl AnimationThread {
     self.last_present = Instant::now();
     self.refresh_period = refresh_period();
 
-    Ok(session.generation)
+    Ok(generation)
+  }
+
+  /// Destroys cached shadow sources that no session uses, once there are
+  /// more than `MAX_CACHED_SHADOWS`.
+  fn evict_unused_shadows(&mut self) {
+    if self.shadows.len() <= MAX_CACHED_SHADOWS {
+      return;
+    }
+
+    let used = self
+      .sessions
+      .values()
+      .flat_map(|session| &session.entries)
+      .filter_map(|entry| entry.shadow.as_ref().map(|shadow| shadow.key))
+      .collect::<HashSet<_>>();
+
+    self.shadows.retain(|key, _| used.contains(key));
   }
 
   /// Renders the next frame of all running animations, and notifies the
@@ -302,7 +344,7 @@ impl AnimationThread {
         continue;
       }
 
-      session.render(present_at);
+      session.render(present_at, &self.shadows);
 
       let is_done = session
         .slide
@@ -324,12 +366,83 @@ impl AnimationThread {
   }
 }
 
+/// Distances between a window's outer frame and its visible frame, i.e.
+/// the size of its invisible resize borders.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FrameInsets {
+  left: i32,
+  top: i32,
+  right: i32,
+  bottom: i32,
+}
+
+impl FrameInsets {
+  /// Queries a window's frame insets. Falls back to no insets if they
+  /// can't be queried.
+  fn of(handle: HWND) -> Self {
+    let mut outer = RECT::default();
+    let mut visible = RECT::default();
+
+    // SAFETY: Both rects are valid out pointers of the correct size.
+    let result = unsafe {
+      GetWindowRect(handle, &raw mut outer).and_then(|()| {
+        DwmGetWindowAttribute(
+          handle,
+          DWMWA_EXTENDED_FRAME_BOUNDS,
+          (&raw mut visible).cast::<c_void>(),
+          // LINT: `RECT` is 16 bytes.
+          #[allow(clippy::cast_possible_truncation)]
+          {
+            std::mem::size_of::<RECT>() as u32
+          },
+        )
+      })
+    };
+
+    if result.is_err() {
+      return Self::default();
+    }
+
+    Self {
+      left: (visible.left - outer.left).max(0),
+      top: (visible.top - outer.top).max(0),
+      right: (outer.right - visible.right).max(0),
+      bottom: (outer.bottom - visible.bottom).max(0),
+    }
+  }
+
+  /// Gets the visible frame of a window whose outer frame is `outer`.
+  fn visible_frame(self, outer: &Rect) -> Rect {
+    Rect::from_ltrb(
+      outer.left + self.left,
+      outer.top + self.top,
+      outer.right - self.right,
+      outer.bottom - self.bottom,
+    )
+  }
+}
+
+/// A window's shadow thumbnail within a session.
+struct ShadowEntry {
+  thumbnail: isize,
+  key: ShadowKey,
+  margins: ShadowMargins,
+}
+
+/// A window's thumbnails within a session.
+struct Entry {
+  window_id: WindowId,
+  thumbnail: isize,
+  shadow: Option<ShadowEntry>,
+  insets: FrameInsets,
+}
+
 /// An overlay window with previews of the windows of one animation.
 struct Session {
   overlay: HWND,
 
-  /// DWM thumbnail IDs by source window.
-  thumbnails: HashMap<WindowId, isize>,
+  /// Thumbnails of the target windows, in target order.
+  entries: Vec<Entry>,
 
   slide: Option<Slide>,
   clip_rect: Rect,
@@ -342,7 +455,7 @@ impl Session {
   fn new() -> crate::Result<Self> {
     Ok(Self {
       overlay: create_overlay_window()?,
-      thumbnails: HashMap::new(),
+      entries: Vec::new(),
       slide: None,
       clip_rect: Rect::from_xy(0, 0, 0, 0),
       generation: 0,
@@ -350,62 +463,177 @@ impl Session {
     })
   }
 
-  /// Registers thumbnails for new target windows, and unregisters those
-  /// of windows that are no longer targets.
-  fn sync_thumbnails(&mut self, targets: &[crate::SlideTarget]) {
-    let target_ids = targets
+  /// Registers thumbnails (and shadow thumbnails) for the target windows,
+  /// unless they're already registered for the same windows and shadow
+  /// sizes.
+  ///
+  /// All shadow thumbnails are registered before all window thumbnails,
+  /// since later thumbnails are drawn on top. This way, shadows never
+  /// cover neighboring windows.
+  fn sync_thumbnails(
+    &mut self,
+    targets: &[crate::SlideTarget],
+    scale_factor: f64,
+    shadows: &mut HashMap<ShadowKey, ShadowSource>,
+  ) {
+    let desired = targets
       .iter()
-      .map(|target| target.window.id())
-      .collect::<HashSet<_>>();
+      .map(|target| {
+        let insets = FrameInsets::of(target.window.hwnd());
+        let frame = insets.visible_frame(&target.to);
 
-    self.thumbnails.retain(|window_id, thumbnail_id| {
-      let is_target = target_ids.contains(window_id);
+        // LINT: Scale factors are small positive numbers.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let key = (
+          frame.width(),
+          frame.height(),
+          (scale_factor * 1000.0).round() as u32,
+        );
 
-      if !is_target {
-        // SAFETY: The thumbnail was registered by this session.
-        let _ = unsafe { DwmUnregisterThumbnail(*thumbnail_id) };
-      }
+        (target.window.id(), key, insets)
+      })
+      .collect::<Vec<_>>();
 
-      is_target
-    });
+    let is_unchanged =
+      self.entries.len() == desired.len()
+        && self.entries.iter().zip(&desired).all(
+          |(entry, (id, key, _))| {
+            entry.window_id == *id
+              && entry
+                .shadow
+                .as_ref()
+                .is_some_and(|shadow| shadow.key == *key)
+          },
+        );
 
-    for target in targets {
-      let window_id = target.window.id();
+    if is_unchanged {
+      return;
+    }
 
-      if self.thumbnails.contains_key(&window_id) {
-        continue;
-      }
+    self.clear_thumbnails();
 
+    let shadow_entries = desired
+      .iter()
+      .map(|(_, key, _)| self.register_shadow(*key, shadows))
+      .collect::<Vec<_>>();
+
+    for ((window_id, _, insets), shadow) in
+      desired.into_iter().zip(shadow_entries)
+    {
       // SAFETY: Both handles refer to top-level windows. The thumbnail
       // is unregistered when the session is hidden or destroyed.
       match unsafe {
-        DwmRegisterThumbnail(self.overlay, target.window.hwnd())
+        DwmRegisterThumbnail(self.overlay, HWND(window_id.0))
       } {
-        Ok(thumbnail_id) => {
-          self.thumbnails.insert(window_id, thumbnail_id);
-        }
+        Ok(thumbnail) => self.entries.push(Entry {
+          window_id,
+          thumbnail,
+          shadow,
+          insets,
+        }),
         Err(err) => {
           tracing::warn!("Failed to register window thumbnail: {}", err);
+
+          if let Some(shadow) = shadow {
+            // SAFETY: The thumbnail was registered by this session.
+            let _ = unsafe { DwmUnregisterThumbnail(shadow.thumbnail) };
+          }
         }
       }
     }
   }
 
-  /// Positions all previews for the given time.
-  fn render(&self, at: Instant) {
+  /// Registers a thumbnail of the shadow source for the given key,
+  /// creating the source if needed. Returns `None` on failure, in which
+  /// case the window is shown without a shadow.
+  fn register_shadow(
+    &self,
+    key: ShadowKey,
+    shadows: &mut HashMap<ShadowKey, ShadowSource>,
+  ) -> Option<ShadowEntry> {
+    let (width, height, scale) = key;
+
+    let source = match shadows.entry(key) {
+      std::collections::hash_map::Entry::Occupied(entry) => {
+        entry.into_mut()
+      }
+      std::collections::hash_map::Entry::Vacant(entry) => {
+        match ShadowSource::new(
+          OVERLAY_CLASS_NAME,
+          width,
+          height,
+          f64::from(scale) / 1000.0,
+        ) {
+          Ok(source) => entry.insert(source),
+          Err(err) => {
+            tracing::warn!("Failed to create window shadow: {}", err);
+            return None;
+          }
+        }
+      }
+    };
+
+    // SAFETY: Both handles refer to top-level windows. The thumbnail is
+    // unregistered before the shadow source is destroyed.
+    match unsafe { DwmRegisterThumbnail(self.overlay, source.handle) } {
+      Ok(thumbnail) => Some(ShadowEntry {
+        thumbnail,
+        key,
+        margins: source.margins,
+      }),
+      Err(err) => {
+        tracing::warn!("Failed to register shadow thumbnail: {}", err);
+        None
+      }
+    }
+  }
+
+  /// Positions all previews and their shadows for the given time.
+  fn render(
+    &self,
+    at: Instant,
+    shadows: &HashMap<ShadowKey, ShadowSource>,
+  ) {
     let Some(slide) = &self.slide else {
       return;
     };
 
     for (window_id, rect) in slide.rects_at(at) {
-      if let Some(thumbnail_id) = self.thumbnails.get(&window_id) {
-        update_thumbnail(
-          *thumbnail_id,
-          HWND(window_id.0),
-          &rect,
-          &self.clip_rect,
-        );
+      let Some(entry) = self
+        .entries
+        .iter()
+        .find(|entry| entry.window_id == window_id)
+      else {
+        continue;
+      };
+
+      if let Some(shadow) = &entry.shadow {
+        if let Some(source) = shadows.get(&shadow.key) {
+          let frame = entry.insets.visible_frame(&rect);
+          let shadow_rect = Rect::from_ltrb(
+            frame.left - shadow.margins.left,
+            frame.top - shadow.margins.top,
+            frame.right + shadow.margins.right,
+            frame.bottom + shadow.margins.bottom,
+          );
+
+          update_thumbnail(
+            shadow.thumbnail,
+            source.handle,
+            &shadow_rect,
+            &shadow_rect,
+            &self.clip_rect,
+          );
+        }
       }
+
+      update_thumbnail(
+        entry.thumbnail,
+        HWND(window_id.0),
+        &rect,
+        &entry.insets.visible_frame(&rect),
+        &self.clip_rect,
+      );
     }
   }
 
@@ -430,11 +658,25 @@ impl Session {
     Ok(())
   }
 
+  /// Unregisters all thumbnails.
+  fn clear_thumbnails(&mut self) {
+    for entry in self.entries.drain(..) {
+      // SAFETY: The thumbnails were registered by this session.
+      unsafe {
+        let _ = DwmUnregisterThumbnail(entry.thumbnail);
+
+        if let Some(shadow) = entry.shadow {
+          let _ = DwmUnregisterThumbnail(shadow.thumbnail);
+        }
+      }
+    }
+  }
+
   /// Hides the overlay and releases its thumbnails.
   fn hide(&mut self) {
     // SAFETY: The overlay window is owned by this session.
     unsafe { ShowWindow(self.overlay, SW_HIDE) };
-    self.sync_thumbnails(&[]);
+    self.clear_thumbnails();
     self.slide = None;
     self.is_running = false;
   }
@@ -449,19 +691,24 @@ impl Session {
   }
 }
 
-/// Draws the part of a window's thumbnail that lies within `clip_rect`,
-/// as if the window's outer frame were positioned at `rect`.
+/// Draws the part `drawn_rect` of a window's thumbnail, as if the
+/// window's outer frame were positioned at `rect`. Parts outside of
+/// `clip_rect` are cut off.
+///
+/// `drawn_rect` excludes the invisible resize borders of windows, which
+/// thumbnails don't draw as transparent.
 fn update_thumbnail(
   thumbnail_id: isize,
   source: HWND,
   rect: &Rect,
+  drawn_rect: &Rect,
   clip_rect: &Rect,
 ) {
   let visible = Rect::from_ltrb(
-    rect.left.max(clip_rect.left),
-    rect.top.max(clip_rect.top),
-    rect.right.min(clip_rect.right),
-    rect.bottom.min(clip_rect.bottom),
+    drawn_rect.left.max(clip_rect.left),
+    drawn_rect.top.max(clip_rect.top),
+    drawn_rect.right.min(clip_rect.right),
+    drawn_rect.bottom.min(clip_rect.bottom),
   );
 
   let is_visible = visible.width() > 0

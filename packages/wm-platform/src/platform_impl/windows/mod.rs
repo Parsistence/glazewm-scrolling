@@ -9,6 +9,7 @@ mod single_instance;
 mod slide_animator;
 mod window_listener;
 mod window_preview;
+mod window_shadow;
 
 pub(crate) use display::*;
 pub(crate) use display_listener::*;

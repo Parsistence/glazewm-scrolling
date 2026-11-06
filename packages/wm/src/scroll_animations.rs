@@ -181,6 +181,7 @@ mod tests {
       clip_rect: wm_platform::Rect::from_xy(0, 0, 100, 100),
       targets: vec![],
       above: vec![],
+      scale_factor: 1.0,
       duration: std::time::Duration::from_millis(100),
       easing: wm_platform::Easing::default(),
     };

@@ -171,9 +171,12 @@ fn update_scroll_offsets(
       })
       .collect::<Vec<_>>();
 
+    let monitor = workspace.monitor().context("No monitor.")?;
+
     let request = SlideRequest {
       key: workspace.id().as_u128(),
-      clip_rect: workspace.monitor().context("No monitor.")?.to_rect()?,
+      clip_rect: monitor.to_rect()?,
+      scale_factor: monitor.native_properties().scale_factor,
       above: targets.iter().map(|target| target.window.clone()).collect(),
       targets,
       duration: Duration::from_millis(u64::from(

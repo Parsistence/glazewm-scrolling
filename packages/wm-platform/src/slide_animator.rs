@@ -37,6 +37,10 @@ pub struct SlideRequest {
   /// The overlay is placed above the highest of these.
   pub above: Vec<NativeWindow>,
 
+  /// DPI scale factor of the monitor the animation is on (e.g. `1.5` at
+  /// 150%), used to size the previews' shadows.
+  pub scale_factor: f32,
+
   pub duration: Duration,
   pub easing: Easing,
 }
@@ -52,7 +56,8 @@ pub struct SlideEnded {
 }
 
 /// Animates windows by sliding live previews of them across the screen,
-/// while the real windows stay hidden.
+/// while the real windows stay hidden. Previews get a drop shadow similar
+/// to the one the OS draws around windows.
 ///
 /// Moving real windows every frame is too slow on Windows (applications
 /// lag far behind their target positions), whereas previews are drawn by
