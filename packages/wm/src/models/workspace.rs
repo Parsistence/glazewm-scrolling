@@ -22,7 +22,7 @@ use crate::{
   scrolling::{self, ColumnSpan, ColumnVisibility},
   traits::{
     CommonGetters, PositionGetters, TilingDirectionGetters,
-    TilingSizeGetters,
+    TilingSizeGetters, WindowGetters,
   },
 };
 
@@ -386,6 +386,22 @@ impl Workspace {
     Ok(new_offset != current_offset)
   }
 
+  /// Whether a tiling window of this workspace is being dragged.
+  ///
+  /// Tiling windows are temporarily floating while dragged, so their
+  /// column is missing from the strip until they're dropped.
+  pub fn has_active_tiling_drag(&self) -> bool {
+    self
+      .children()
+      .into_iter()
+      .filter_map(|child| child.as_non_tiling_window().cloned())
+      .any(|window| {
+        window
+          .active_drag()
+          .is_some_and(|drag| !drag.is_from_floating)
+      })
+  }
+
   /// Effective outer gaps for this workspace.
   ///
   /// Uses `single_window_outer_gap` when the workspace has a single tiling
@@ -562,7 +578,8 @@ impl std::fmt::Display for Workspace {
 
 #[cfg(test)]
 mod tests {
-  use wm_common::{TilingDirection, WorkspaceLayout};
+  use wm_common::{ActiveDrag, TilingDirection, WorkspaceLayout};
+  use wm_platform::Rect;
 
   use crate::{
     commands::container::{
@@ -577,7 +594,9 @@ mod tests {
     test_utils::{
       MOCK_MONITOR_HEIGHT, MOCK_MONITOR_WIDTH, MOCK_TASKBAR_HEIGHT,
     },
-    traits::{CommonGetters, PositionGetters, TilingSizeGetters},
+    traits::{
+      CommonGetters, PositionGetters, TilingSizeGetters, WindowGetters,
+    },
   };
 
   /// Creates a scrolling workspace on a mock monitor with the given
@@ -614,6 +633,30 @@ mod tests {
     assert_eq!(state.columns[2].start, half_width * 2);
     assert_eq!(state.columns[2].width, half_width);
     assert_eq!(state.focused_column_id, Some(third_column.id()));
+  }
+
+  #[test]
+  fn detects_dragged_tiling_windows() {
+    let dragged = NonTilingWindow::mock().call();
+    let workspace = Workspace::mock()
+      .layout(WorkspaceLayout::Scrolling)
+      .tiling_containers(vec![window()])
+      .non_tiling_windows(vec![dragged.clone()])
+      .call();
+
+    let drag = |is_from_floating| ActiveDrag {
+      operation: None,
+      is_from_floating,
+      initial_position: Rect::from_xy(0, 0, 100, 100),
+    };
+
+    assert!(!workspace.has_active_tiling_drag());
+
+    dragged.set_active_drag(Some(drag(true)));
+    assert!(!workspace.has_active_tiling_drag());
+
+    dragged.set_active_drag(Some(drag(false)));
+    assert!(workspace.has_active_tiling_drag());
   }
 
   #[test]

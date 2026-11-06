@@ -111,9 +111,14 @@ fn broadcast_scroll_state_changes(
 /// focused column, and queues their columns for redraw if the viewport
 /// moved.
 fn update_scroll_offsets(state: &mut WmState) -> anyhow::Result<()> {
+  // The offset is kept while a tiling window is dragged. Otherwise, the
+  // strip would scroll under the cursor when the dragged window's column
+  // is temporarily removed, changing where the window gets dropped.
   let scrolling_workspaces =
     state.workspaces().into_iter().filter(|workspace| {
-      workspace.is_scrolling() && workspace.is_displayed()
+      workspace.is_scrolling()
+        && workspace.is_displayed()
+        && !workspace.has_active_tiling_drag()
     });
 
   for workspace in scrolling_workspaces {
