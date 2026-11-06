@@ -104,6 +104,28 @@ See its [README](resources/zebar/glazewm-scrolling/README.md) for installation.
 
 Positions are in pixels along the strip. The viewport is the workspace's `width`, starting at `scrollOffset`. A `workspace_updated` event is emitted whenever the layout or scroll state changes.
 
+## Building an installer
+
+Releases are built and signed by CI (`.github/workflows/package.yaml`). To build an x64 installer locally, run the following in PowerShell from the repo root. It needs [Rust](https://rustup.rs) and the [.NET SDK](https://dotnet.microsoft.com/download).
+
+```powershell
+# Build release executables. Without the `ui_access` feature, since
+# UIAccess executables only launch when signed.
+$env:VERSION_NUMBER = "0.1.0"
+cargo build --locked --release --target x86_64-pc-windows-msvc -p wm -p wm-cli -p wm-watcher
+New-Item -ItemType Directory -Force out/x64
+Copy-Item target/x86_64-pc-windows-msvc/release/glazewm*.exe out/x64/
+
+# Install WiX 5 and its extensions, then build the MSI.
+dotnet tool install --global wix --version 5.0.0
+wix extension add -g WixToolset.UI.wixext/5 WixToolset.Util.wixext/5
+wix build -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+  -out out/installer-x64.msi resources/wix/standalone.wxs resources/wix/standalone-ui.wxs `
+  -d VERSION_NUMBER="0.1.0" -d EXE_DIR="out/x64"
+```
+
+`out/installer-x64.msi` installs to `C:\Program Files\glzr.io\GlazeWM Scrolling\`, next to an existing GlazeWM install. Without UIAccess, GlazeWM Scrolling can't move or focus windows of apps running as administrator.
+
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for the architecture of the scrolling layout, and [CONTRIBUTING.md](CONTRIBUTING.md) for general development.
