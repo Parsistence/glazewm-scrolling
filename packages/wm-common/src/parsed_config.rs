@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use wm_platform::{
-  Color, CornerStyle, Key, Keybinding, LengthUnit, LengthValue,
+  Color, CornerStyle, Easing, Key, Keybinding, LengthUnit, LengthValue,
   OpacityValue, RectDelta,
 };
 
@@ -138,6 +138,34 @@ pub struct ScrollingConfig {
 
   /// How columns that are partially outside the viewport are shown.
   pub peek_mode: PeekMode,
+
+  /// Animation of the strip when it scrolls.
+  pub animation: ScrollAnimationConfig,
+}
+
+/// Animation of a scrolling workspace's strip when its scroll offset
+/// changes.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase"))]
+pub struct ScrollAnimationConfig {
+  /// Whether scrolling is animated.
+  pub enabled: bool,
+
+  /// Duration of the animation in milliseconds.
+  pub duration_ms: u32,
+
+  /// Timing curve of the animation.
+  pub easing: Easing,
+}
+
+impl Default for ScrollAnimationConfig {
+  fn default() -> Self {
+    ScrollAnimationConfig {
+      enabled: true,
+      duration_ms: 200,
+      easing: Easing::default(),
+    }
+  }
 }
 
 /// How columns that are partially outside a scrolling workspace's
@@ -177,6 +205,7 @@ impl Default for ScrollingConfig {
         percentage(1.0),
       ],
       peek_mode: PeekMode::default(),
+      animation: ScrollAnimationConfig::default(),
     }
   }
 }

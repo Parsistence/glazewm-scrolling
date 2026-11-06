@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Context;
 #[cfg(target_os = "windows")]
 use wm_common::WindowEffectConfig;
@@ -9,7 +11,7 @@ use wm_common::{
 use wm_platform::NativeWindowWindowsExt;
 #[cfg(target_os = "windows")]
 use wm_platform::{CornerStyle, OpacityValue};
-use wm_platform::{Rect, WindowZOrder};
+use wm_platform::{Rect, SlideRequest, SlideTarget, WindowZOrder};
 
 use crate::{
   models::{Container, WindowContainer, Workspace},
@@ -31,7 +33,7 @@ pub fn platform_sync(
     sync_focus(&focused_container, state)?;
   }
 
-  update_scroll_offsets(state)?;
+  update_scroll_offsets(state, config)?;
 
   if !state.pending_sync.containers_to_redraw().is_empty()
     || !state.pending_sync.workspaces_to_reorder().is_empty()
@@ -110,7 +112,15 @@ fn broadcast_scroll_state_changes(
 /// Scrolls displayed workspaces with the scrolling layout to reveal their
 /// focused column, and queues their columns for redraw if the viewport
 /// moved.
-fn update_scroll_offsets(state: &mut WmState) -> anyhow::Result<()> {
+///
+/// If enabled, the strip animates from its previous to its new position
+/// (see `ScrollAnimations`).
+fn update_scroll_offsets(
+  state: &mut WmState,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  cancel_stale_animations(state);
+
   // The offset is kept while a tiling window is dragged. Otherwise, the
   // strip would scroll under the cursor when the dragged window's column
   // is temporarily removed, changing where the window gets dropped.
@@ -121,15 +131,118 @@ fn update_scroll_offsets(state: &mut WmState) -> anyhow::Result<()> {
         && !workspace.has_active_tiling_drag()
     });
 
+  let animation_config = &config.value.general.scrolling.animation;
+
   for workspace in scrolling_workspaces {
-    if workspace.update_scroll_offset()? {
+    let start_rects = tiling_window_rects(&workspace)?;
+    let did_scroll = workspace.update_scroll_offset()?;
+
+    if did_scroll {
+      state
+        .pending_sync
+        .queue_containers_to_redraw(workspace.tiling_children());
+    }
+
+    // Animations already running are retargeted on every sync, since
+    // windows may have been added, removed or resized.
+    let should_animate = animation_config.enabled
+      && (state.scroll_animations.is_animating(workspace.id())
+        || (did_scroll
+          && state.scroll_animations.was_displayed(workspace.id())));
+
+    if !should_animate {
+      continue;
+    }
+
+    let targets = tiling_window_rects(&workspace)?
+      .into_iter()
+      .map(|(window, to)| {
+        let from = start_rects
+          .iter()
+          .find(|(start_window, _)| start_window.id() == window.id())
+          .map_or_else(|| to.clone(), |(_, rect)| rect.clone());
+
+        SlideTarget {
+          window: window.native().clone(),
+          from,
+          to,
+        }
+      })
+      .collect::<Vec<_>>();
+
+    let request = SlideRequest {
+      key: workspace.id().as_u128(),
+      clip_rect: workspace.monitor().context("No monitor.")?.to_rect()?,
+      above: targets.iter().map(|target| target.window.clone()).collect(),
+      targets,
+      duration: Duration::from_millis(u64::from(
+        animation_config.duration_ms,
+      )),
+      easing: animation_config.easing,
+    };
+
+    // Redraw the workspace's windows to hide them for the duration of the
+    // animation.
+    if state.scroll_animations.start(workspace.id(), request) {
       state
         .pending_sync
         .queue_containers_to_redraw(workspace.tiling_children());
     }
   }
 
+  let displayed_workspace_ids = state
+    .workspaces()
+    .into_iter()
+    .filter(Workspace::is_displayed)
+    .map(|workspace| workspace.id())
+    .collect();
+
+  state
+    .scroll_animations
+    .set_displayed(displayed_workspace_ids);
+
   Ok(())
+}
+
+/// Cancels animations of workspaces that are no longer displayed or no
+/// longer use the scrolling layout, and queues their windows for redraw.
+fn cancel_stale_animations(state: &mut WmState) {
+  for workspace_id in state.scroll_animations.animating_workspace_ids() {
+    let workspace = state
+      .workspaces()
+      .into_iter()
+      .find(|workspace| workspace.id() == workspace_id);
+
+    let is_stale = workspace.as_ref().is_none_or(|workspace| {
+      !workspace.is_scrolling() || !workspace.is_displayed()
+    });
+
+    if is_stale {
+      state.scroll_animations.cancel(workspace_id);
+
+      if let Some(workspace) = workspace {
+        state
+          .pending_sync
+          .queue_containers_to_redraw(workspace.tiling_children());
+      }
+    }
+  }
+}
+
+/// Gets the tiling windows of a workspace with the rects their outer
+/// frames are positioned at.
+fn tiling_window_rects(
+  workspace: &Workspace,
+) -> anyhow::Result<Vec<(WindowContainer, Rect)>> {
+  workspace
+    .descendants()
+    .filter_map(|descendant| descendant.as_window_container().ok())
+    .filter(WindowContainer::is_tiling_window)
+    .map(|window| {
+      let rect = window_frame_rect(&window)?;
+      Ok((window, rect))
+    })
+    .collect()
 }
 
 /// Decides how a window is shown based on its column's position relative
@@ -196,9 +309,12 @@ fn window_frame_rect(window: &WindowContainer) -> anyhow::Result<Rect> {
 fn sync_window_previews(state: &mut WmState) -> anyhow::Result<()> {
   let mut desired = Vec::new();
 
+  // Animating workspaces show previews of all their windows instead.
   let displayed_scrolling_workspaces =
     state.workspaces().into_iter().filter(|workspace| {
-      workspace.is_scrolling() && workspace.is_displayed()
+      workspace.is_scrolling()
+        && workspace.is_displayed()
+        && !state.scroll_animations.is_animating(workspace.id())
     });
 
   for workspace in displayed_scrolling_workspaces {
@@ -415,11 +531,19 @@ fn redraw_containers(
       continue;
     }
 
-    // Windows in columns outside the viewport are hidden even though their
-    // workspace is displayed. Peeking windows that are replaced by a
-    // preview are hidden too (see `sync_window_previews`).
-    let is_scrolled_out = workspace.is_displayed()
+    // Windows in columns outside the viewport are hidden (and parked)
+    // even though their workspace is displayed. Peeking windows that are
+    // replaced by a preview are hidden too (see `sync_window_previews`).
+    let is_parked = workspace.is_displayed()
       && window_peek(window, &workspace, state)? != PeekDecision::Shown;
+
+    // While the strip animates, its windows are hidden at their final
+    // positions and shown as previews instead.
+    let is_animating = window.is_tiling_window()
+      && state.scroll_animations.is_animating(workspace.id());
+
+    let is_scrolled_out =
+      is_parked || (workspace.is_displayed() && is_animating);
 
     // Transition display state depending on whether window will be
     // shown or hidden.
@@ -449,6 +573,7 @@ fn redraw_containers(
       &z_order,
       is_visible,
       is_scrolled_out,
+      is_parked,
       config,
     ) {
       tracing::warn!("Failed to set window position: {}", err);
@@ -503,10 +628,11 @@ fn redraw_containers(
 
 /// Moves and resizes a window to its target rect, and shows or hides it.
 ///
-/// Windows in scrolled-out columns (`is_scrolled_out`) are parked within
-/// the viewport and cloaked, regardless of the hide method. This keeps
-/// their DWM thumbnails live, keeps them visible in the taskbar, and keeps
-/// them on-screen if the WM exits without restoring them.
+/// Scrolled-out windows (`is_scrolled_out`) are cloaked regardless of the
+/// hide method. This keeps their DWM thumbnails live and keeps them
+/// visible in the taskbar. Those in columns outside the viewport
+/// (`is_parked`) are also moved within the viewport, so that they stay
+/// on-screen if the WM exits without restoring them.
 fn reposition_window(
   window: &WindowContainer,
   hide_corner: HideCorner,
@@ -517,15 +643,16 @@ fn reposition_window(
   // LINT: `is_scrolled_out` is only used on Windows.
   #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   is_scrolled_out: bool,
+  is_parked: bool,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   let rect = window
     .to_rect()?
     .apply_delta(&window.total_border_delta()?, None);
 
-  // Scrolled-out windows are parked within the viewport while cloaked, so
+  // Windows outside the viewport are parked within it while cloaked, so
   // that they never end up off-screen (e.g. if the WM crashes).
-  let rect = if is_scrolled_out {
+  let rect = if is_parked {
     window
       .workspace()
       .context("No workspace.")?

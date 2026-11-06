@@ -11,7 +11,8 @@ use wm_common::{
 #[cfg(target_os = "windows")]
 use wm_platform::NativeWindowWindowsExt;
 use wm_platform::{
-  Dispatcher, LengthValue, PlatformEvent, RectDelta, WindowEvent,
+  Dispatcher, LengthValue, PlatformEvent, RectDelta, SlideEnded,
+  WindowEvent,
 };
 
 use crate::{
@@ -150,6 +151,35 @@ impl WindowManager {
     if !state.is_paused && state.pending_sync.has_changes() {
       platform_sync(state, config)?;
     }
+
+    Ok(())
+  }
+
+  /// Shows the real windows of a workspace whose scroll animation has
+  /// ended, then removes the animation's previews.
+  pub fn handle_scroll_animation_ended(
+    &mut self,
+    ended: &SlideEnded,
+    config: &mut UserConfig,
+  ) -> anyhow::Result<()> {
+    let state = &mut self.state;
+
+    let Some(workspace_id) = state.scroll_animations.end(ended) else {
+      return Ok(());
+    };
+
+    if let Some(workspace) = state
+      .workspaces()
+      .into_iter()
+      .find(|workspace| workspace.id() == workspace_id)
+    {
+      state
+        .pending_sync
+        .queue_containers_to_redraw(workspace.tiling_children());
+    }
+
+    platform_sync(state, config)?;
+    state.scroll_animations.finish(ended);
 
     Ok(())
   }

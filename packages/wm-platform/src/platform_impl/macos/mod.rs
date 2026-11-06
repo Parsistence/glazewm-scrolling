@@ -11,6 +11,7 @@ mod mouse_listener;
 mod native_window;
 mod notification_center;
 mod single_instance;
+mod slide_animator;
 mod window_listener;
 mod window_preview;
 
@@ -26,5 +27,6 @@ pub(crate) use mouse_listener::*;
 pub(crate) use native_window::*;
 pub(crate) use notification_center::*;
 pub(crate) use single_instance::*;
+pub(crate) use slide_animator::*;
 pub(crate) use window_listener::*;
 pub(crate) use window_preview::*;

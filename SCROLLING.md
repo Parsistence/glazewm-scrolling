@@ -47,6 +47,7 @@ Switching a workspace between layouts keeps its windows and their order.
   - `hide`: peeking columns are hidden.
 
   Previews are Windows-only; on macOS peeking windows are always shown.
+- **Animation.** When the view scrolls, the strip slides to its new position (Windows-only). During the slide, the windows are briefly replaced by live previews that the compositor moves, since moving real windows every frame is too slow for most apps. The real windows reappear at their new positions when the slide ends.
 
 ## Config
 
@@ -61,6 +62,13 @@ general:
 
     # How partially visible columns are shown: 'auto', 'preview' or 'hide'.
     peek_mode: 'auto'
+
+    # Animation of the strip when it scrolls.
+    animation:
+      enabled: true
+      duration_ms: 200
+      # 'ease_out_cubic', 'ease_in_out_cubic' or 'linear'.
+      easing: 'ease_out_cubic'
 ```
 
 Percentages are relative to the workspace width (the monitor width minus outer gaps). Pixel values such as `'800px'` also work.

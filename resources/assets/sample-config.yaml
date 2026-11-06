@@ -58,6 +58,13 @@ general:
     # - 'hide': Peeking columns are hidden.
     peek_mode: 'auto'
 
+    # Animation of the strip when it scrolls. (Windows-only.)
+    animation:
+      enabled: true
+      duration_ms: 200
+      # Timing curve: 'ease_out_cubic', 'ease_in_out_cubic' or 'linear'.
+      easing: 'ease_out_cubic'
+
 gaps:
   # Whether to scale the gaps with the DPI of the monitor.
   scale_with_dpi: true

@@ -41,6 +41,7 @@ mod events;
 mod ipc_server;
 mod models;
 mod pending_sync;
+mod scroll_animations;
 mod scrolling;
 mod sys_tray;
 mod traits;
@@ -133,6 +134,10 @@ async fn start_wm(
   let mut wm = WindowManager::new(&mut config, dispatcher.clone())?;
 
   let mut ipc_server = IpcServer::start().await?;
+
+  // Notifications for ended scroll animations. `None` if animations are
+  // unsupported on this platform.
+  let mut scroll_animation_rx = wm.state.scroll_animations.enable();
 
   // On Windows, start watcher process for restoring hidden windows on
   // crash. macOS' hidden windows are always accessible.
@@ -281,6 +286,9 @@ async fn start_wm(
 
         Ok(())
       },
+      Some(ended) = recv_optional(&mut scroll_animation_rx) => {
+        wm.handle_scroll_animation_ended(&ended, &mut config)
+      },
       Some(()) = tray.config_reload_rx.recv() => {
         wm.process_commands(
           &vec![InvokeCommand::WmReloadConfig],
@@ -300,6 +308,17 @@ async fn start_wm(
   wm.cleanup(&mut config, &mut ipc_server);
 
   Ok(())
+}
+
+/// Receives the next message from an optional channel. Never resolves if
+/// the channel is `None`.
+async fn recv_optional<T>(
+  rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<T>>,
+) -> Option<T> {
+  match rx {
+    Some(rx) => rx.recv().await,
+    None => std::future::pending().await,
+  }
 }
 
 /// Initialize logging with the specified verbosity level.

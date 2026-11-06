@@ -25,6 +25,7 @@ use crate::{
     WindowContainer, Workspace, WorkspaceTarget,
   },
   pending_sync::PendingSync,
+  scroll_animations::ScrollAnimations,
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
   window_previews::WindowPreviews,
@@ -74,6 +75,9 @@ pub struct WmState {
   /// workspaces.
   pub window_previews: WindowPreviews,
 
+  /// Animations of scrolling workspaces' strips.
+  pub scroll_animations: ScrollAnimations,
+
   /// Whether the initial state has been populated.
   has_initialized: bool,
 
@@ -102,6 +106,7 @@ impl WmState {
       is_paused: false,
       is_focus_synced: false,
       window_previews: WindowPreviews::default(),
+      scroll_animations: ScrollAnimations::default(),
       has_initialized: false,
       event_tx,
       exit_tx,
