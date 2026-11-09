@@ -321,16 +321,30 @@ async fn recv_optional<T>(
   }
 }
 
+/// Number of daily session log files to keep.
+const MAX_SESSION_LOG_FILES: usize = 7;
+
 /// Initialize logging with the specified verbosity level.
 ///
-/// Error logs are saved to `~/.glzr/glazewm-scrolling/errors.log`.
+/// Logs are written to stdout, and to daily session log files in
+/// `~/.glzr/glazewm-scrolling/logs/` (keeping the last
+/// `MAX_SESSION_LOG_FILES`), both at the specified verbosity level. Error
+/// logs are additionally saved to `~/.glzr/glazewm-scrolling/errors.log`.
 fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
-  let error_log_dir = home::home_dir()
+  let app_data_dir = home::home_dir()
     .context("Unable to get home directory.")?
     .join(APP_DATA_DIR);
 
   let error_writer =
-    tracing_appender::rolling::never(error_log_dir, "errors.log");
+    tracing_appender::rolling::never(&app_data_dir, "errors.log");
+
+  let session_writer = tracing_appender::rolling::Builder::new()
+    .rotation(tracing_appender::rolling::Rotation::DAILY)
+    .filename_prefix("glazewm")
+    .filename_suffix("log")
+    .max_log_files(MAX_SESSION_LOG_FILES)
+    .build(app_data_dir.join("logs"))
+    .context("Failed to create session log file.")?;
 
   let subscriber = tracing_subscriber::registry()
     .with(
@@ -339,8 +353,15 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
         .with_writer(std::io::stdout.with_max_level(verbosity.level())),
     )
     .with(
+      // Output to session log file with specified verbosity level.
+      fmt::Layer::new()
+        .with_ansi(false)
+        .with_writer(session_writer.with_max_level(verbosity.level())),
+    )
+    .with(
       // Output to error log file.
       fmt::Layer::new()
+        .with_ansi(false)
         .with_writer(error_writer.with_max_level(Level::ERROR)),
     );
 

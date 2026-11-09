@@ -1,6 +1,6 @@
 use std::{
   cell::{Ref, RefCell, RefMut},
-  collections::VecDeque,
+  collections::{HashMap, VecDeque},
   rc::Rc,
 };
 
@@ -19,7 +19,7 @@ use crate::{
   models::{
     Container, DirectionContainer, TilingContainer, WindowContainer,
   },
-  scrolling::{self, ColumnSpan, ColumnVisibility},
+  scrolling::{self, ColumnSpan, ColumnVisibility, RevealMode},
   traits::{
     CommonGetters, PositionGetters, TilingDirectionGetters,
     TilingSizeGetters, WindowGetters,
@@ -44,6 +44,10 @@ struct WorkspaceInner {
   /// Horizontal scroll position of the viewport within the column strip
   /// (in pixels). Only used by the scrolling layout.
   scroll_offset: i32,
+
+  /// Sizes that full-width columns are restored to, keyed by column ID.
+  /// Only used by the scrolling layout.
+  pre_full_width_sizes: HashMap<Uuid, f32>,
 
   /// Layout and scroll state that was last broadcast over IPC. Used to
   /// only emit events when the state changes.
@@ -79,6 +83,7 @@ impl Workspace {
       layout,
       scrolling_config,
       scroll_offset: 0,
+      pre_full_width_sizes: HashMap::new(),
       broadcast_scroll_state: None,
     };
 
@@ -136,6 +141,29 @@ impl Workspace {
 
   pub fn set_scroll_offset(&self, scroll_offset: i32) {
     self.0.borrow_mut().scroll_offset = scroll_offset;
+  }
+
+  /// Remembers the size to restore a column to when it leaves full width.
+  ///
+  /// Also forgets sizes of containers that are no longer columns of this
+  /// workspace.
+  pub fn set_pre_full_width_size(&self, column_id: Uuid, size: f32) {
+    let column_ids = self
+      .tiling_children()
+      .map(|column| column.id())
+      .collect::<Vec<_>>();
+
+    let mut inner = self.0.borrow_mut();
+    inner
+      .pre_full_width_sizes
+      .retain(|id, _| column_ids.contains(id));
+    inner.pre_full_width_sizes.insert(column_id, size);
+  }
+
+  /// Removes and returns the size a full-width column should be restored
+  /// to, if one was remembered.
+  pub fn take_pre_full_width_size(&self, column_id: Uuid) -> Option<f32> {
+    self.0.borrow_mut().pre_full_width_sizes.remove(&column_id)
   }
 
   /// How columns that are partially outside the viewport are shown.
@@ -351,11 +379,14 @@ impl Workspace {
     }
   }
 
-  /// Scrolls the viewport just enough to fully reveal the focused column,
-  /// and keeps the viewport within the bounds of the strip.
+  /// Scrolls the viewport to reveal the focused column (see
+  /// `RevealMode`), and keeps the viewport within the bounds of the strip.
   ///
   /// Returns whether the scroll offset changed.
-  pub fn update_scroll_offset(&self) -> anyhow::Result<bool> {
+  pub fn update_scroll_offset(
+    &self,
+    reveal_mode: RevealMode,
+  ) -> anyhow::Result<bool> {
     let viewport_width = self.to_rect()?.width();
     let column_spans = self.column_spans()?;
     let current_offset = self.scroll_offset();
@@ -368,7 +399,12 @@ impl Workspace {
     });
 
     let revealed_offset = focused_span.map_or(current_offset, |span| {
-      scrolling::offset_to_reveal(current_offset, span, viewport_width)
+      scrolling::offset_for_reveal(
+        current_offset,
+        span,
+        viewport_width,
+        reveal_mode,
+      )
     });
 
     let spans = column_spans
@@ -590,7 +626,7 @@ mod tests {
       Container, Monitor, NonTilingWindow, SplitContainer,
       TilingContainer, TilingWindow, Workspace,
     },
-    scrolling::ColumnVisibility,
+    scrolling::{ColumnVisibility, RevealMode},
     test_utils::{
       MOCK_MONITOR_HEIGHT, MOCK_MONITOR_WIDTH, MOCK_TASKBAR_HEIGHT,
     },
@@ -623,7 +659,7 @@ mod tests {
     let half_width = MOCK_MONITOR_WIDTH / 2;
     let third_column = workspace.tiling_children().nth(2).unwrap();
     set_focused_descendant(&third_column.clone().into(), None);
-    workspace.update_scroll_offset().unwrap();
+    workspace.update_scroll_offset(RevealMode::Minimal).unwrap();
 
     let state = workspace.scrolling_state_dto().unwrap().unwrap();
 
@@ -750,19 +786,44 @@ mod tests {
     let third_column = workspace.tiling_children().nth(2).unwrap();
 
     set_focused_descendant(&third_column.clone().into(), None);
-    assert!(workspace.update_scroll_offset().unwrap());
+    assert!(workspace.update_scroll_offset(RevealMode::Minimal).unwrap());
     assert_eq!(workspace.scroll_offset(), half_width);
     assert_eq!(third_column.to_rect().unwrap().x(), half_width);
 
     // Already revealed, so no further scrolling.
-    assert!(!workspace.update_scroll_offset().unwrap());
+    assert!(!workspace.update_scroll_offset(RevealMode::Minimal).unwrap());
 
     // Focusing the second column keeps the viewport where it is, since
     // the second column is already fully visible.
     let second_column = workspace.tiling_children().nth(1).unwrap();
     set_focused_descendant(&second_column.into(), None);
-    assert!(!workspace.update_scroll_offset().unwrap());
+    assert!(!workspace.update_scroll_offset(RevealMode::Minimal).unwrap());
     assert_eq!(workspace.scroll_offset(), half_width);
+  }
+
+  #[test]
+  fn centered_reveal_persists_until_focus_leaves_the_viewport() {
+    let workspace =
+      scrolling_workspace(vec![window(), window(), window(), window()]);
+    let quarter_width = MOCK_MONITOR_WIDTH / 4;
+    let second_column = workspace.tiling_children().nth(1).unwrap();
+
+    set_focused_descendant(&second_column.into(), None);
+    assert!(workspace
+      .update_scroll_offset(RevealMode::Centered)
+      .unwrap());
+    assert_eq!(workspace.scroll_offset(), quarter_width);
+
+    // A minimal reveal keeps the centered column where it is.
+    assert!(!workspace.update_scroll_offset(RevealMode::Minimal).unwrap());
+
+    // Centering the first column is clamped to the start of the strip.
+    let first_column = workspace.tiling_children().next().unwrap();
+    set_focused_descendant(&first_column.into(), None);
+    workspace
+      .update_scroll_offset(RevealMode::Centered)
+      .unwrap();
+    assert_eq!(workspace.scroll_offset(), 0);
   }
 
   #[test]
@@ -771,7 +832,7 @@ mod tests {
       scrolling_workspace(vec![window(), window(), window()]);
     let third_column = workspace.tiling_children().nth(2).unwrap();
     set_focused_descendant(&third_column.clone().into(), None);
-    workspace.update_scroll_offset().unwrap();
+    workspace.update_scroll_offset(RevealMode::Minimal).unwrap();
 
     detach_container(third_column.into()).unwrap();
 
@@ -781,7 +842,7 @@ mod tests {
 
     // Remaining strip exactly fills the viewport, so the offset clamps to
     // zero.
-    workspace.update_scroll_offset().unwrap();
+    workspace.update_scroll_offset(RevealMode::Minimal).unwrap();
     assert_eq!(workspace.scroll_offset(), 0);
   }
 

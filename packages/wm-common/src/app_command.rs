@@ -158,21 +158,26 @@ pub enum SubscribableEvent {
 pub enum InvokeCommand {
   AdjustBorders(InvokeAdjustBordersCommand),
   Close,
+  /// Scrolls the viewport to center the focused column. Only applies to
+  /// workspaces with the scrolling layout.
+  CenterColumn,
   /// Moves the focused window into the adjacent column in the given
-  /// direction. Only applies to workspaces with the scrolling layout.
-  ConsumeIntoColumn {
-    #[clap(long)]
-    direction: Direction,
-  },
+  /// direction, or pulls the top window of the adjacent column into the
+  /// focused column. Only applies to workspaces with the scrolling
+  /// layout.
+  ConsumeIntoColumn(InvokeConsumeIntoColumnCommand),
   /// Cycles the width of the focused column through the configured
   /// presets. Only applies to workspaces with the scrolling layout.
   CycleColumnWidth,
-  /// Moves the focused window out of its column into a new column in the
-  /// given direction. Only applies to workspaces with the scrolling
-  /// layout.
+  /// Moves the focused window (or with `--last`, the last window of the
+  /// focused column) out of its column into a new column in the given
+  /// direction. Only applies to workspaces with the scrolling layout.
   ExpelFromColumn {
     #[clap(long)]
     direction: Direction,
+
+    #[clap(long)]
+    last: bool,
   },
   Focus(InvokeFocusCommand),
   Ignore,
@@ -242,6 +247,10 @@ pub enum InvokeCommand {
   },
   // Reuse `InvokeResizeCommand` struct.
   Size(InvokeResizeCommand),
+  /// Toggles the focused column between the full width of the viewport
+  /// and its previous width. Only applies to workspaces with the
+  /// scrolling layout.
+  ToggleColumnFullWidth,
   /// Toggles the focused workspace between the scrolling and tiling
   /// layouts.
   ToggleLayout,
@@ -320,6 +329,31 @@ pub enum TitleBarVisibility {
   Hidden,
 }
 
+/// A column at either end of a scrolling workspace's strip.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ValueEnum)]
+#[clap(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ColumnTarget {
+  /// The leftmost column.
+  First,
+
+  /// The rightmost column.
+  Last,
+}
+
+#[derive(Args, Clone, Debug, PartialEq, Serialize)]
+#[group(required = true, multiple = false)]
+pub struct InvokeConsumeIntoColumnCommand {
+  /// Direction of the column to move the focused window into.
+  #[clap(long)]
+  pub direction: Option<Direction>,
+
+  /// Direction of the column to pull the top window from, into the
+  /// focused column.
+  #[clap(long)]
+  pub from: Option<Direction>,
+}
+
 #[derive(Args, Clone, Debug, PartialEq, Serialize)]
 #[group(required = true, multiple = true)]
 pub struct InvokeAdjustBordersCommand {
@@ -354,6 +388,10 @@ pub struct InvokeFocusCommand {
 
   #[clap(long)]
   pub monitor: Option<usize>,
+
+  /// Focus the first or last column of a scrolling workspace.
+  #[clap(long, value_enum)]
+  pub column: Option<ColumnTarget>,
 
   #[clap(long)]
   pub next_active_workspace: bool,
@@ -392,6 +430,11 @@ pub struct InvokeMoveCommand {
   /// Name of workspace to move the window.
   #[clap(long)]
   pub workspace: Option<String>,
+
+  /// Move the window's column to the start or end of a scrolling
+  /// workspace.
+  #[clap(long, value_enum)]
+  pub column: Option<ColumnTarget>,
 
   #[clap(long)]
   pub next_active_workspace: bool,

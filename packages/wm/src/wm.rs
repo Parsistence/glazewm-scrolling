@@ -27,8 +27,10 @@ use crate::{
     },
     monitor::focus_monitor,
     scrolling::{
-      consume_into_column, cycle_column_width, expel_from_column,
-      scroll_in_direction, set_layout,
+      center_column, consume_into_column, cycle_column_width,
+      expel_from_column, expel_last_from_column, focus_column_at_edge,
+      move_column_to_edge, pull_into_column, scroll_in_direction,
+      set_layout, toggle_column_full_width,
     },
     window::{
       ignore_window, move_window_in_direction, move_window_to_workspace,
@@ -165,8 +167,17 @@ impl WindowManager {
     let state = &mut self.state;
 
     let Some(workspace_id) = state.scroll_animations.end(ended) else {
+      tracing::debug!(
+        "Ignoring outdated scroll animation end (generation {}).",
+        ended.generation
+      );
       return Ok(());
     };
+
+    tracing::debug!(
+      "Scroll animation ended (generation {}).",
+      ended.generation
+    );
 
     if let Some(workspace) = state
       .workspaces()
@@ -326,6 +337,10 @@ impl WindowManager {
           focus_monitor(*monitor_index, state, config)?;
         }
 
+        if let Some(target) = args.column {
+          focus_column_at_edge(&subject_container, target, state);
+        }
+
         if args.next_active_workspace {
           focus_workspace(WorkspaceTarget::NextActive, state, config)?;
         }
@@ -398,6 +413,12 @@ impl WindowManager {
                 state,
                 config,
               )?;
+            }
+
+            if let (Some(target), Some(window)) =
+              (args.column, subject_container.as_tiling_window())
+            {
+              move_column_to_edge(window, target, state)?;
             }
 
             if args.next_active_workspace {
@@ -769,19 +790,36 @@ impl WindowManager {
       InvokeCommand::ToggleTilingDirection => {
         toggle_tiling_direction(subject_container, state, config)
       }
-      InvokeCommand::ConsumeIntoColumn { direction } => {
-        match subject_container.as_tiling_window() {
-          Some(window) => {
-            consume_into_column(window, direction, state, config)
-          }
-          _ => Ok(()),
+      InvokeCommand::CenterColumn => {
+        center_column(&subject_container, state);
+        Ok(())
+      }
+      InvokeCommand::ConsumeIntoColumn(args) => {
+        if let Some(direction) = &args.from {
+          pull_into_column(&subject_container, direction, state, config)?;
         }
+
+        if let (Some(direction), Some(window)) =
+          (&args.direction, subject_container.as_tiling_window())
+        {
+          consume_into_column(window, direction, state, config)?;
+        }
+
+        Ok(())
       }
       InvokeCommand::CycleColumnWidth => {
         cycle_column_width(&subject_container, state);
         Ok(())
       }
-      InvokeCommand::ExpelFromColumn { direction } => {
+      InvokeCommand::ExpelFromColumn { direction, last } => {
+        if *last {
+          return expel_last_from_column(
+            &subject_container,
+            direction,
+            state,
+          );
+        }
+
         match subject_container.as_tiling_window() {
           Some(window) => expel_from_column(window, direction, state),
           _ => Ok(()),
@@ -796,6 +834,10 @@ impl WindowManager {
           subject_container.workspace().context("No workspace.")?;
 
         set_layout(&workspace, *layout, state)
+      }
+      InvokeCommand::ToggleColumnFullWidth => {
+        toggle_column_full_width(&subject_container, state);
+        Ok(())
       }
       InvokeCommand::ToggleLayout => {
         let workspace =

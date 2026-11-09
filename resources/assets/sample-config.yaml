@@ -265,10 +265,38 @@ keybindings:
   - commands: ['expel-from-column --direction right']
     bindings: ['alt+shift+oem_period']
 
+  # Scrolling layout (as in PaperWM): pull the top window of the column to
+  # the right into the focused column, or move the bottom window of the
+  # focused column out into a new column to the right. Focus stays put.
+  - commands: ['consume-into-column --from right']
+    bindings: ['alt+shift+i']
+  - commands: ['expel-from-column --direction right --last']
+    bindings: ['alt+shift+o']
+
   # Scrolling layout: cycle the focused column's width through
   # `column_width_presets`.
   - commands: ['cycle-column-width']
     bindings: ['alt+w']
+
+  # Scrolling layout: toggle the focused column between full width and
+  # its previous width.
+  - commands: ['toggle-column-full-width']
+    bindings: ['alt+shift+c']
+
+  # Scrolling layout: scroll to center the focused column.
+  - commands: ['center-column']
+    bindings: ['alt+c']
+
+  # Scrolling layout: focus the first/last column, or move the focused
+  # column to the start/end of the strip.
+  - commands: ['focus --column first']
+    bindings: ['alt+home']
+  - commands: ['focus --column last']
+    bindings: ['alt+end']
+  - commands: ['move --column first']
+    bindings: ['alt+shift+home']
+  - commands: ['move --column last']
+    bindings: ['alt+shift+end']
 
   # Scrolling layout: `scroll --direction left|right` focuses the adjacent
   # column without leaving the workspace or moving the cursor. Intended to

@@ -37,7 +37,7 @@ Switching a workspace between layouts keeps its windows and their order.
 
 - **Columns.** Each window opens in a new column to the right of the focused one. The column takes `default_column_width` (50% by default) of the workspace width. Columns may extend past the screen.
 - **Scrolling follows focus.** The view scrolls just far enough to show the focused column in full. `focus --direction left|right` moves between columns; at either end of the strip it continues to the adjacent monitor, as in upstream GlazeWM.
-- **Stacks.** A column can hold several windows stacked vertically. `consume-into-column` stacks the focused window into the neighbouring column, and `expel-from-column` moves it out into its own column. `focus --direction up|down` moves within a stack, and `move --direction up|down` reorders it.
+- **Stacks.** A column can hold several windows stacked vertically. `consume-into-column` stacks the focused window into the neighbouring column, and `expel-from-column` moves it out into its own column. As in PaperWM, `consume-into-column --from right` (`alt+shift+i`) instead pulls the neighbouring window into the focused column, and `expel-from-column --direction right --last` (`alt+shift+o`) pushes the column's bottom window out. `focus --direction up|down` moves within a stack, and `move --direction up|down` reorders it.
 - **Moving columns.** `move --direction left|right` swaps the whole focused column with its neighbour.
 - **Widths.** `cycle-column-width` steps the focused column through `column_width_presets`. `resize --width` and `size --width` work on whole columns, relative to the workspace width.
 - **Off-screen columns** are hidden from the screen but stay in the taskbar. Focusing one (for example from the taskbar) scrolls to it. If GlazeWM Scrolling exits or crashes, all windows are restored.
@@ -81,7 +81,13 @@ Percentages are relative to the workspace width (the monitor width minus outer g
 | `set-layout --layout scrolling\|tiling` | | Set the focused workspace's layout. |
 | `consume-into-column --direction left\|right` | `alt+,` / `alt+.` | Stack the focused window into the column to the left/right. |
 | `expel-from-column --direction left\|right` | `alt+shift+,` / `alt+shift+.` | Move the focused window out of its column, into a new column to the left/right. |
+| `consume-into-column --from left\|right` | `alt+shift+i` (right) | Pull the top window of the column to the left/right into the bottom of the focused column. Focus stays put. |
+| `expel-from-column --direction left\|right --last` | `alt+shift+o` (right) | Move the bottom window of the focused column out into a new column to the left/right. Focus stays put. |
 | `cycle-column-width` | `alt+w` | Cycle the focused column's width through `column_width_presets`. |
+| `toggle-column-full-width` | `alt+shift+c` | Toggle the focused column between full width and its previous width. |
+| `center-column` | `alt+c` | Scroll to center the focused column. It stays centered until focus moves to a column outside the view. Columns near either end of the strip can only be centered as far as the strip allows. |
+| `focus --column first\|last` | `alt+home` / `alt+end` | Focus the first/last column. |
+| `move --column first\|last` | `alt+shift+home` / `alt+shift+end` | Move the focused column to the start/end of the strip. |
 | `scroll --direction left\|right` | | Focus the adjacent column without leaving the workspace or moving the cursor. Meant for bars (mouse wheel). |
 
 Commands can also be run from the CLI, e.g. `glazewm-scrolling command toggle-layout`.

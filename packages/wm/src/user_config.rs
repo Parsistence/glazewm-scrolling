@@ -400,8 +400,11 @@ impl UserConfig {
 
 #[cfg(test)]
 mod tests {
-  use wm_common::{InvokeCommand, ParsedConfig, WorkspaceLayout};
-  use wm_platform::{LengthUnit, LengthValue};
+  use wm_common::{
+    InvokeCommand, InvokeConsumeIntoColumnCommand, ParsedConfig,
+    WorkspaceLayout,
+  };
+  use wm_platform::{Direction, LengthUnit, LengthValue};
 
   use super::SAMPLE_CONFIG;
 
@@ -433,6 +436,18 @@ mod tests {
     };
     assert!(has_command(&InvokeCommand::ToggleLayout));
     assert!(has_command(&InvokeCommand::CycleColumnWidth));
+    assert!(has_command(&InvokeCommand::CenterColumn));
+    assert!(has_command(&InvokeCommand::ToggleColumnFullWidth));
+    assert!(has_command(&InvokeCommand::ConsumeIntoColumn(
+      InvokeConsumeIntoColumnCommand {
+        direction: None,
+        from: Some(Direction::Right),
+      }
+    )));
+    assert!(has_command(&InvokeCommand::ExpelFromColumn {
+      direction: Direction::Right,
+      last: true,
+    }));
   }
 
   #[test]

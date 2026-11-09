@@ -71,6 +71,8 @@ pub fn manage_window(
       window.workspace().context("No workspace.")?,
     );
 
+    state.pending_sync.queue_opened_window(window.clone());
+
     // Sibling containers need to be redrawn if the window is tiling.
     state.pending_sync.queue_container_to_redraw(
       if window.state() == WindowState::Tiling {

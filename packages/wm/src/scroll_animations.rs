@@ -4,6 +4,12 @@
 //! slide across the screen (see `wm_platform::SlideAnimator`), and the
 //! real windows stay cloaked at their final positions. Once the animation
 //! ends, the real windows are shown again and the previews are removed.
+//!
+//! When a window opens in a scrolling workspace, the strip animates to
+//! make room for it (like PaperWM): its slot opens up empty while the
+//! other columns slide aside, and the window appears once the animation
+//! ends. Its preview isn't shown, since new windows typically haven't
+//! drawn anything yet.
 
 use std::collections::{HashMap, HashSet};
 
@@ -30,6 +36,10 @@ pub struct ScrollAnimations {
   /// the last sync, by window ID. Animations start from these, so that
   /// columns shifted by an inserted or removed column slide too.
   strip_rects: HashMap<Uuid, Rect>,
+
+  /// IDs of opening windows of each animating workspace, by workspace ID.
+  /// These have no preview and stay hidden until the animation ends.
+  opening: HashMap<Uuid, HashSet<Uuid>>,
 }
 
 impl ScrollAnimations {
@@ -58,6 +68,31 @@ impl ScrollAnimations {
   /// IDs of workspaces whose strip is currently animating.
   pub fn animating_workspace_ids(&self) -> Vec<Uuid> {
     self.active.keys().copied().collect()
+  }
+
+  /// Whether the given window is opening, i.e. hidden without a preview
+  /// until its workspace's animation ends.
+  pub fn is_opening(&self, window_id: Uuid) -> bool {
+    self
+      .opening
+      .values()
+      .any(|window_ids| window_ids.contains(&window_id))
+  }
+
+  /// Marks windows of an animating workspace as opening. Has no effect if
+  /// the workspace isn't animating.
+  pub fn add_opening(
+    &mut self,
+    workspace_id: Uuid,
+    window_ids: impl IntoIterator<Item = Uuid>,
+  ) {
+    if self.is_animating(workspace_id) {
+      self
+        .opening
+        .entry(workspace_id)
+        .or_default()
+        .extend(window_ids);
+    }
   }
 
   /// Whether the given workspace was displayed at the last sync.
@@ -121,6 +156,7 @@ impl ScrollAnimations {
     }
 
     self.active.remove(&workspace_id);
+    self.opening.remove(&workspace_id);
     Some(workspace_id)
   }
 
@@ -137,6 +173,7 @@ impl ScrollAnimations {
   /// Stops a workspace's animation and removes its previews immediately.
   pub fn cancel(&mut self, workspace_id: Uuid) {
     self.active.remove(&workspace_id);
+    self.opening.remove(&workspace_id);
 
     if let Some(animator) = &self.animator {
       if let Err(err) = animator.cancel(workspace_id.as_u128()) {
@@ -169,6 +206,40 @@ mod tests {
     };
     assert_eq!(animations.end(&current), Some(workspace_id));
     assert!(!animations.is_animating(workspace_id));
+  }
+
+  #[test]
+  fn opening_windows_are_cleared_when_animation_ends() {
+    let workspace_id = Uuid::new_v4();
+    let window_id = Uuid::new_v4();
+    let mut animations = ScrollAnimations::default();
+
+    // Not animating, so the window isn't hidden.
+    animations.add_opening(workspace_id, [window_id]);
+    assert!(!animations.is_opening(window_id));
+
+    animations.active.insert(workspace_id, 1);
+    animations.add_opening(workspace_id, [window_id]);
+    assert!(animations.is_opening(window_id));
+
+    let ended = SlideEnded {
+      key: workspace_id.as_u128(),
+      generation: 1,
+    };
+    assert_eq!(animations.end(&ended), Some(workspace_id));
+    assert!(!animations.is_opening(window_id));
+  }
+
+  #[test]
+  fn opening_windows_are_cleared_on_cancel() {
+    let workspace_id = Uuid::new_v4();
+    let window_id = Uuid::new_v4();
+    let mut animations = ScrollAnimations::default();
+
+    animations.active.insert(workspace_id, 1);
+    animations.add_opening(workspace_id, [window_id]);
+    animations.cancel(workspace_id);
+    assert!(!animations.is_opening(window_id));
   }
 
   #[test]

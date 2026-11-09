@@ -1,8 +1,8 @@
 use tracing::warn;
-use wm_common::TilingDirection;
+use wm_common::{ColumnTarget, TilingDirection};
 use wm_platform::Direction;
 
-use super::adjacent_column;
+use super::{adjacent_column, window_at_column_edge};
 use crate::{
   commands::container::{
     flatten_child_split_containers, move_container_within_tree,
@@ -62,6 +62,37 @@ pub fn consume_into_column(
     .queue_containers_to_redraw(workspace.tiling_children());
 
   Ok(())
+}
+
+/// Pulls the top window of the adjacent column in the given direction
+/// into the subject's column, stacking it at the bottom.
+///
+/// Focus stays on the focused window. No-op if there's no adjacent
+/// column, or if the subject's workspace doesn't use the scrolling layout.
+pub fn pull_into_column(
+  subject_container: &Container,
+  direction: &Direction,
+  state: &mut WmState,
+  config: &UserConfig,
+) -> anyhow::Result<()> {
+  if matches!(direction, Direction::Up | Direction::Down) {
+    warn!("Can only pull from columns to the left or right.");
+    return Ok(());
+  }
+
+  let Some(workspace) = subject_container.scrolling_workspace() else {
+    return Ok(());
+  };
+
+  let Some(source_window) =
+    adjacent_column(&workspace, subject_container, direction).and_then(
+      |column| window_at_column_edge(&column, ColumnTarget::First),
+    )
+  else {
+    return Ok(());
+  };
+
+  consume_into_column(&source_window, &direction.inverse(), state, config)
 }
 
 /// Gets the vertical split container that windows should be stacked into

@@ -83,6 +83,12 @@ pub fn clamp_column_size(size: f32) -> f32 {
   size.clamp(MIN_COLUMN_SIZE, MAX_COLUMN_SIZE)
 }
 
+/// Whether a column of the given size spans the full viewport width.
+#[must_use]
+pub fn is_full_width(size: f32) -> bool {
+  size >= MAX_COLUMN_SIZE - SIZE_EPSILON
+}
+
 /// Lays out columns of the given sizes left-to-right, separated by `gap`.
 #[must_use]
 pub fn column_spans(
@@ -141,6 +147,45 @@ pub fn offset_to_reveal(
     span.end() - viewport_width
   } else {
     offset
+  }
+}
+
+/// Gets the scroll offset that centers the given span in the viewport.
+///
+/// Columns wider than the viewport are aligned to the viewport's left
+/// edge. The result may lie outside the strip, so it should be clamped
+/// with [`clamp_offset`].
+#[must_use]
+pub fn offset_to_center(span: ColumnSpan, viewport_width: i32) -> i32 {
+  if span.width >= viewport_width {
+    span.start
+  } else {
+    span.start - (viewport_width - span.width) / 2
+  }
+}
+
+/// How the viewport is scrolled to reveal the focused column.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RevealMode {
+  /// Scroll just enough to show the column in full.
+  Minimal,
+
+  /// Scroll to center the column.
+  Centered,
+}
+
+/// Gets the scroll offset that reveals the given span, starting from
+/// `offset`. See [`offset_to_reveal`] and [`offset_to_center`].
+#[must_use]
+pub fn offset_for_reveal(
+  offset: i32,
+  span: ColumnSpan,
+  viewport_width: i32,
+  mode: RevealMode,
+) -> i32 {
+  match mode {
+    RevealMode::Minimal => offset_to_reveal(offset, span, viewport_width),
+    RevealMode::Centered => offset_to_center(span, viewport_width),
   }
 }
 
@@ -387,6 +432,39 @@ mod tests {
       width: 1200,
     };
     assert_eq!(offset_to_reveal(0, span, 1000), 400);
+  }
+
+  #[test]
+  fn center_ignores_current_offset_and_aligns_wide_columns_left() {
+    let span = ColumnSpan {
+      start: 1200,
+      width: 500,
+    };
+
+    assert_eq!(
+      offset_for_reveal(0, span, 1000, RevealMode::Centered),
+      950
+    );
+    assert_eq!(
+      offset_for_reveal(5000, span, 1000, RevealMode::Centered),
+      950
+    );
+
+    let wide_span = ColumnSpan {
+      start: 400,
+      width: 1200,
+    };
+    assert_eq!(offset_to_center(wide_span, 1000), 400);
+  }
+
+  #[test]
+  fn center_of_first_column_is_clamped_to_strip_start() {
+    let span = ColumnSpan {
+      start: 0,
+      width: 500,
+    };
+
+    assert_eq!(clamp_offset(offset_to_center(span, 1000), 3000, 1000), 0);
   }
 
   #[test]

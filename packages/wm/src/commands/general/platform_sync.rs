@@ -1,6 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
+use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use wm_common::WindowEffectConfig;
 use wm_common::{
@@ -15,7 +16,7 @@ use wm_platform::{Rect, SlideRequest, SlideTarget, WindowZOrder};
 
 use crate::{
   models::{Container, WindowContainer, Workspace},
-  scrolling::{self, ColumnVisibility, PeekDecision},
+  scrolling::{self, ColumnVisibility, PeekDecision, RevealMode},
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
   window_previews::DesiredPreview,
@@ -109,12 +110,28 @@ fn broadcast_scroll_state_changes(
   Ok(())
 }
 
+/// Gets how a scrolling workspace should reveal its focused column in
+/// this sync.
+fn reveal_mode(workspace: &Workspace, state: &WmState) -> RevealMode {
+  if state
+    .pending_sync
+    .workspaces_to_center()
+    .contains(&workspace.id())
+  {
+    RevealMode::Centered
+  } else {
+    RevealMode::Minimal
+  }
+}
+
 /// Scrolls displayed workspaces with the scrolling layout to reveal their
-/// focused column, and queues their columns for redraw if the viewport
-/// moved.
+/// focused column (centering it if queued via
+/// `queue_workspace_to_center`), and queues their columns for redraw if
+/// the viewport moved.
 ///
 /// If enabled, the strip animates from its previous to its new position
-/// (see `ScrollAnimations`).
+/// (see `ScrollAnimations`). It also animates when a newly opened window
+/// shifts other columns, even if the viewport didn't move.
 fn update_scroll_offsets(
   state: &mut WmState,
   config: &UserConfig,
@@ -134,7 +151,8 @@ fn update_scroll_offsets(
   let animation_config = &config.value.general.scrolling.animation;
 
   for workspace in scrolling_workspaces {
-    let did_scroll = workspace.update_scroll_offset()?;
+    let did_scroll =
+      workspace.update_scroll_offset(reveal_mode(&workspace, state))?;
 
     if did_scroll {
       state
@@ -142,34 +160,52 @@ fn update_scroll_offsets(
         .queue_containers_to_redraw(workspace.tiling_children());
     }
 
+    if !animation_config.enabled {
+      continue;
+    }
+
+    let window_rects = tiling_window_rects(&workspace)?;
+
+    // Newly opened windows get an empty slot that the other columns slide
+    // aside for, and appear once the animation ends.
+    let opened_window_ids = window_rects
+      .iter()
+      .map(|(window, _)| window.id())
+      .filter(|id| state.pending_sync.opened_window_ids().contains(id))
+      .collect::<Vec<_>>();
+
+    let above = window_rects
+      .iter()
+      .map(|(window, _)| window.native().clone())
+      .collect::<Vec<_>>();
+
+    let targets = slide_targets(window_rects, &opened_window_ids, state);
+
+    let makes_room = !opened_window_ids.is_empty()
+      && targets.iter().any(|target| target.from != target.to);
+
     // Animations already running are retargeted on every sync, since
     // windows may have been added, removed or resized.
-    let should_animate = animation_config.enabled
-      && (state.scroll_animations.is_animating(workspace.id())
-        || (did_scroll
-          && state.scroll_animations.was_displayed(workspace.id())));
+    let is_animating =
+      state.scroll_animations.is_animating(workspace.id());
+    let should_animate = is_animating
+      || ((did_scroll || makes_room)
+        && state.scroll_animations.was_displayed(workspace.id()));
+
+    tracing::debug!(
+      "Scroll sync for workspace {}: offset={}, did_scroll={}, \
+       makes_room={}, is_animating={}, should_animate={}.",
+      workspace.id(),
+      workspace.scroll_offset(),
+      did_scroll,
+      makes_room,
+      is_animating,
+      should_animate,
+    );
 
     if !should_animate {
       continue;
     }
-
-    let targets = tiling_window_rects(&workspace)?
-      .into_iter()
-      .map(|(window, to)| {
-        // New windows appear in place.
-        let from = state
-          .scroll_animations
-          .last_strip_rect(window.id())
-          .cloned()
-          .unwrap_or_else(|| to.clone());
-
-        SlideTarget {
-          window: window.native().clone(),
-          from,
-          to,
-        }
-      })
-      .collect::<Vec<_>>();
 
     let monitor = workspace.monitor().context("No monitor.")?;
 
@@ -177,7 +213,7 @@ fn update_scroll_offsets(
       key: workspace.id().as_u128(),
       clip_rect: monitor.to_rect()?,
       scale_factor: monitor.native_properties().scale_factor,
-      above: targets.iter().map(|target| target.window.clone()).collect(),
+      above,
       targets,
       duration: Duration::from_millis(u64::from(
         animation_config.duration_ms,
@@ -185,9 +221,18 @@ fn update_scroll_offsets(
       easing: animation_config.easing,
     };
 
+    let did_start = state.scroll_animations.start(workspace.id(), request);
+    tracing::debug!(
+      "Scroll animation started or retargeted: {did_start}."
+    );
+
+    state
+      .scroll_animations
+      .add_opening(workspace.id(), opened_window_ids);
+
     // Redraw the workspace's windows to hide them for the duration of the
     // animation.
-    if state.scroll_animations.start(workspace.id(), request) {
+    if did_start {
       state
         .pending_sync
         .queue_containers_to_redraw(workspace.tiling_children());
@@ -214,6 +259,39 @@ fn update_scroll_offsets(
   );
 
   Ok(())
+}
+
+/// Gets the slide targets for a scrolling workspace's tiling windows,
+/// sliding from where they were placed at the last sync.
+///
+/// Opening windows are excluded, since they appear once the animation
+/// ends. Windows that weren't in the strip before (e.g. moved from
+/// another workspace) appear in place.
+fn slide_targets(
+  window_rects: Vec<(WindowContainer, Rect)>,
+  opened_window_ids: &[Uuid],
+  state: &WmState,
+) -> Vec<SlideTarget> {
+  window_rects
+    .into_iter()
+    .filter(|(window, _)| {
+      !opened_window_ids.contains(&window.id())
+        && !state.scroll_animations.is_opening(window.id())
+    })
+    .map(|(window, to)| {
+      let from = state
+        .scroll_animations
+        .last_strip_rect(window.id())
+        .cloned()
+        .unwrap_or_else(|| to.clone());
+
+      SlideTarget {
+        window: window.native().clone(),
+        from,
+        to,
+      }
+    })
+    .collect()
 }
 
 /// Cancels animations of workspaces that are no longer displayed or no
@@ -468,14 +546,22 @@ fn redraw_containers(
       .descendant_focus_order()
       .collect::<Vec<_>>();
 
-    // Sort the windows to update by their focus order. The most recently
-    // focused window will be updated first.
+    // Sort the windows to update by their focus order. Windows are
+    // updated in reverse, so the most recently focused window is updated
+    // last. Exceptions are opening windows (see `ScrollAnimations`),
+    // which are updated first: they're still at the position the OS
+    // opened them at, and there's no preview covering them. Hiding them
+    // last would leave them visible there while all other windows are
+    // being hidden (~10 ms each).
     // TODO: To reduce flicker, redraw windows that will be shown first,
     // then redraw the ones to be hidden last.
     windows.sort_by_key(|window| {
-      descendant_focus_order
-        .iter()
-        .position(|order| order.id() == window.id())
+      (
+        state.scroll_animations.is_opening(window.id()),
+        descendant_focus_order
+          .iter()
+          .position(|order| order.id() == window.id()),
+      )
     });
 
     windows
@@ -526,10 +612,22 @@ fn redraw_containers(
 
     // Set the z-order of the window.
     //
+    // Windows that are hidden by the WM are skipped (e.g. scrolled-out
+    // columns, or windows of an animating strip). Setting their z-order
+    // would show them again (`SWP_SHOWWINDOW` uncloaks them) and raise
+    // them above the scroll animation's previews. Their z-order is set
+    // when they're redrawn to be shown.
+    //
     // NOTE: macOS doesn't have a robust public API for setting the z-order
     // of a window. See `NativeWindow::raise` for more details.
     #[cfg(target_os = "windows")]
-    if should_bring_to_front && !windows_to_redraw.contains(window) {
+    if should_bring_to_front
+      && !windows_to_redraw.contains(window)
+      && matches!(
+        window.display_state(),
+        DisplayState::Shown | DisplayState::Showing
+      )
+    {
       tracing::info!("Updating window z-order: {window}");
 
       if let Err(err) = window.native().set_z_order(&z_order) {
@@ -577,6 +675,16 @@ fn redraw_containers(
     let is_visible = matches!(
       window.display_state(),
       DisplayState::Showing | DisplayState::Shown
+    );
+
+    tracing::debug!(
+      "Redrawing window {}: visible={}, scrolled_out={}, parked={}, \
+       animating={}.",
+      window.native().id().0,
+      is_visible,
+      is_scrolled_out,
+      is_parked,
+      is_animating,
     );
 
     if let Err(err) = reposition_window(

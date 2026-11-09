@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -30,6 +30,18 @@ pub struct PendingSync {
   /// Whether to jump the cursor to the focused container (if enabled in
   /// user config).
   needs_cursor_jump: bool,
+
+  /// IDs of windows that were managed since the last sync. In scrolling
+  /// workspaces, room is made for them with an animation (see
+  /// `ScrollAnimations`).
+  ///
+  /// Managing a window always queues a redraw, so this doesn't count as a
+  /// change on its own.
+  opened_window_ids: HashSet<Uuid>,
+
+  /// IDs of scrolling workspaces whose viewport should be scrolled to
+  /// center their focused column.
+  workspaces_to_center: HashSet<Uuid>,
 }
 
 impl PendingSync {
@@ -40,6 +52,7 @@ impl PendingSync {
       || self.needs_focused_effect_update
       || self.needs_all_effects_update
       || self.needs_cursor_jump
+      || !self.workspaces_to_center.is_empty()
   }
 
   pub fn clear(&mut self) -> &mut Self {
@@ -49,6 +62,8 @@ impl PendingSync {
     self.needs_focused_effect_update = false;
     self.needs_all_effects_update = false;
     self.needs_cursor_jump = false;
+    self.opened_window_ids.clear();
+    self.workspaces_to_center.clear();
     self
   }
 
@@ -116,6 +131,24 @@ impl PendingSync {
     self
   }
 
+  /// Marks a window as newly managed.
+  pub fn queue_opened_window<T>(&mut self, window: T) -> &mut Self
+  where
+    T: Into<Container>,
+  {
+    self.opened_window_ids.insert(window.into().id());
+    self
+  }
+
+  /// Marks a scrolling workspace to have its focused column centered.
+  pub fn queue_workspace_to_center(
+    &mut self,
+    workspace: &Workspace,
+  ) -> &mut Self {
+    self.workspaces_to_center.insert(workspace.id());
+    self
+  }
+
   pub fn needs_focus_update(&self) -> bool {
     self.needs_focus_update
   }
@@ -138,5 +171,15 @@ impl PendingSync {
 
   pub fn workspaces_to_reorder(&self) -> &Vec<Workspace> {
     &self.workspaces_to_reorder
+  }
+
+  /// IDs of windows that were managed since the last sync.
+  pub fn opened_window_ids(&self) -> &HashSet<Uuid> {
+    &self.opened_window_ids
+  }
+
+  /// IDs of scrolling workspaces whose focused column should be centered.
+  pub fn workspaces_to_center(&self) -> &HashSet<Uuid> {
+    &self.workspaces_to_center
   }
 }

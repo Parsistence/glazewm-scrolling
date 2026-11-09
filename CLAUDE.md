@@ -53,6 +53,7 @@ Other:
 cargo build                          # default members: wm, wm-cli
 cargo build -p wm-watcher            # once; `cargo run` doesn't build it, and without it crashed sessions leave windows hidden
 cargo run -- start --verbose         # runs the wm (debug logs); stop a hung instance with `Stop-Process -Name glazewm -Force`
+                                     # logs also go to ~/.glzr/glazewm-scrolling/logs/glazewm.YYYY-MM-DD.log (same level, last 7 days)
 cargo test                           # all tests
 cargo test -p wm                     # one crate
 cargo test -p wm <test_name_substr>  # single test
@@ -87,7 +88,7 @@ cargo test -p wm <test_name_substr>  # single test
 - Pure geometry (spans, reveal, clamp, visibility, presets) lives in `packages/wm/src/scrolling.rs`; column rects come from `traits::scrolling_column_rect`.
 - `platform_sync` calls `update_scroll_offsets` before redrawing: viewport minimally scrolls to the workspace's most recently focused column (view is derived from focus). Use `Workspace::tiling_insertion_point` to insert tiling windows (column-level in scrolling workspaces).
 - Columns fully outside the viewport are cloaked (Windows; any `hide_method`) and parked *within* the viewport (`Workspace::parked_column_rect`), stay in the taskbar, and drive `DisplayState` like hidden workspaces. Never leave them off-screen: DWM thumbnails of off-screen windows freeze (verified), peek previews (planned) depend on live thumbnails, and off-screen windows are unreachable if the WM dies. Shutdown (`WmState::drop`) and `wm-watcher` uncloak windows.
-- Scrolling commands: `commands/scrolling/` (`scroll`, `consume-into-column`, `expel-from-column`, `cycle-column-width`, `set-layout`, `toggle-layout`). `move left/right` swaps whole columns.
+- Scrolling commands: `commands/scrolling/` (`scroll`, `consume-into-column [--from]`, `expel-from-column [--last]`, `cycle-column-width`, `toggle-column-full-width`, `center-column`, `focus/move --column first|last`, `set-layout`, `toggle-layout`). `move left/right` swaps whole columns. `center-column` queues `pending_sync.queue_workspace_to_center`; `update_scroll_offsets` then uses `RevealMode::Centered` once (later minimal reveals keep it).
 
 **Hiding windows.** Windows on non-displayed workspaces are hidden by `reposition_window` in `platform_sync.rs` — moved to a monitor "hide corner" (`HideCorner`, leaving a `VISIBLE_SLIVER`) or cloaked (Windows), per `HideMethod` config. `DisplayState` (Shown/Showing/Hiding/Hidden) tracks transitions so resulting platform events can be ignored.
 

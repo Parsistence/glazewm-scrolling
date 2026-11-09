@@ -228,6 +228,13 @@ impl AnimationThread {
       }
       Command::Finish(key, generation) => {
         if let Some(session) = self.sessions.get_mut(&key) {
+          tracing::debug!(
+            "Slide {key}: finish requested (generation {generation}, \
+             current {}, running={}).",
+            session.generation,
+            session.is_running,
+          );
+
           if session.generation == generation && !session.is_running {
             // Wait for the real windows to be composited before removing
             // the previews in front of them.
@@ -238,6 +245,7 @@ impl AnimationThread {
       }
       Command::Cancel(key) => {
         if let Some(session) = self.sessions.get_mut(&key) {
+          tracing::debug!("Slide {key}: cancelled.");
           session.hide();
         }
       }
@@ -270,6 +278,16 @@ impl AnimationThread {
       }
     }
 
+    session.clip_rect = request.clip_rect.clone();
+    session.sync_thumbnails(
+      &request.targets,
+      f64::from(request.scale_factor),
+      &mut self.shadows,
+    );
+
+    // Taken after registering thumbnails, which can be slow (e.g. when
+    // shadow sources need to be created). Otherwise, the animation would
+    // already be partly or fully over by its first frame.
     let now = Instant::now();
     let windows = request
       .targets
@@ -280,6 +298,19 @@ impl AnimationThread {
         to: target.to.clone(),
       })
       .collect::<Vec<_>>();
+
+    tracing::debug!(
+      "Slide {}: {} (generation {}, running={}). Targets: {:?}.",
+      request.key,
+      if session.slide.is_some() {
+        "retargeting"
+      } else {
+        "starting"
+      },
+      self.next_generation,
+      session.is_running,
+      windows,
+    );
 
     match &mut session.slide {
       Some(slide) => {
@@ -294,12 +325,6 @@ impl AnimationThread {
     session.generation = self.next_generation;
     self.next_generation += 1;
     session.is_running = true;
-    session.clip_rect = request.clip_rect.clone();
-    session.sync_thumbnails(
-      &request.targets,
-      f64::from(request.scale_factor),
-      &mut self.shadows,
-    );
     session.render(now, &self.shadows);
     session.show(&request.above)?;
     let generation = session.generation;
@@ -336,8 +361,17 @@ impl AnimationThread {
   fn render_frame(&mut self) {
     // Position previews for when the frame is expected to be presented,
     // which keeps the motion even if a frame is occasionally late.
-    let present_at =
-      (self.last_present + self.refresh_period).max(Instant::now());
+    let now = Instant::now();
+    let present_at = (self.last_present + self.refresh_period).max(now);
+
+    let since_last_present =
+      now.saturating_duration_since(self.last_present);
+    if since_last_present > self.refresh_period * 3 {
+      tracing::debug!(
+        "Slide frame late: {} ms since the last frame.",
+        since_last_present.as_millis()
+      );
+    }
 
     for (key, session) in &mut self.sessions {
       if !session.is_running {
@@ -352,6 +386,11 @@ impl AnimationThread {
         .is_none_or(|slide| slide.is_done(present_at));
 
       if is_done {
+        tracing::debug!(
+          "Slide {} ended (generation {}).",
+          key,
+          session.generation
+        );
         session.is_running = false;
 
         let _ = self.ended_tx.send(SlideEnded {
@@ -704,17 +743,29 @@ fn update_thumbnail(
   drawn_rect: &Rect,
   clip_rect: &Rect,
 ) {
-  let visible = Rect::from_ltrb(
-    drawn_rect.left.max(clip_rect.left),
-    drawn_rect.top.max(clip_rect.top),
-    drawn_rect.right.min(clip_rect.right),
-    drawn_rect.bottom.min(clip_rect.bottom),
-  );
+  // Previews entirely outside the clip rect are only hidden. Their
+  // destination and source rects would be inverted, which DWM rejects as
+  // a whole, leaving the preview frozen at its last visible position.
+  let Some(visible) = visible_part(rect, drawn_rect, clip_rect) else {
+    let properties = DWM_THUMBNAIL_PROPERTIES {
+      dwFlags: DWM_TNP_VISIBLE,
+      fVisible: BOOL(0),
+      ..Default::default()
+    };
 
-  let is_visible = visible.width() > 0
-    && visible.height() > 0
-    && rect.width() > 0
-    && rect.height() > 0;
+    // SAFETY: The thumbnail ID is valid while registered.
+    if let Err(err) = unsafe {
+      DwmUpdateThumbnailProperties(thumbnail_id, &raw const properties)
+    } {
+      tracing::warn!(
+        "Failed to hide thumbnail of window {:?}: {}",
+        source.0,
+        err
+      );
+    }
+
+    return;
+  };
 
   // Thumbnail source coordinates are relative to the source window's
   // outer frame (including invisible resize borders), even though
@@ -762,15 +813,48 @@ fn update_thumbnail(
       bottom: scale(visible.bottom - rect.top, scale_y),
     },
     opacity: u8::MAX,
-    fVisible: BOOL::from(is_visible),
+    fVisible: BOOL(1),
     fSourceClientAreaOnly: BOOL(0),
   };
 
   // SAFETY: The thumbnail ID is valid while registered. Failures (e.g.
   // the source window was destroyed) leave the preview unchanged.
-  let _ = unsafe {
+  if let Err(err) = unsafe {
     DwmUpdateThumbnailProperties(thumbnail_id, &raw const properties)
-  };
+  } {
+    tracing::debug!(
+      "Failed to update thumbnail of window {:?} (rect {:?}, visible \
+       {:?}): {}",
+      source.0,
+      rect,
+      visible,
+      err
+    );
+  }
+}
+
+/// Gets the part of `drawn_rect` that lies within `clip_rect`.
+///
+/// Returns `None` if nothing of it is visible, or if the outer frame
+/// `rect` is empty.
+fn visible_part(
+  rect: &Rect,
+  drawn_rect: &Rect,
+  clip_rect: &Rect,
+) -> Option<Rect> {
+  let visible = Rect::from_ltrb(
+    drawn_rect.left.max(clip_rect.left),
+    drawn_rect.top.max(clip_rect.top),
+    drawn_rect.right.min(clip_rect.right),
+    drawn_rect.bottom.min(clip_rect.bottom),
+  );
+
+  let is_visible = visible.width() > 0
+    && visible.height() > 0
+    && rect.width() > 0
+    && rect.height() > 0;
+
+  is_visible.then_some(visible)
 }
 
 /// Gets the `hWndInsertAfter` argument that places the overlay directly
@@ -943,5 +1027,45 @@ extern "system" fn overlay_window_proc(
     WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
     // SAFETY: Forwards unhandled messages to the default procedure.
     _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::visible_part;
+  use crate::Rect;
+
+  /// A 1000x800 monitor.
+  fn clip_rect() -> Rect {
+    Rect::from_xy(0, 0, 1000, 800)
+  }
+
+  #[test]
+  fn partly_visible_previews_are_clipped() {
+    let rect = Rect::from_xy(700, 0, 600, 800);
+
+    assert_eq!(
+      visible_part(&rect, &rect, &clip_rect()),
+      Some(Rect::from_ltrb(700, 0, 1000, 800))
+    );
+  }
+
+  #[test]
+  fn previews_outside_the_clip_rect_are_not_visible() {
+    // Fully past either edge, which would otherwise give inverted rects.
+    let right_of_clip = Rect::from_xy(1200, 0, 600, 800);
+    let left_of_clip = Rect::from_xy(-2500, 0, 1250, 800);
+    let touching_edge = Rect::from_xy(1000, 0, 600, 800);
+
+    for rect in [right_of_clip, left_of_clip, touching_edge] {
+      assert_eq!(visible_part(&rect, &rect, &clip_rect()), None);
+    }
+  }
+
+  #[test]
+  fn empty_previews_are_not_visible() {
+    let rect = Rect::from_xy(100, 0, 0, 800);
+
+    assert_eq!(visible_part(&rect, &rect, &clip_rect()), None);
   }
 }
